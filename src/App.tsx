@@ -6,7 +6,6 @@ import SignupPage from "@/pages/signup";
 import OnboardingPage from "@/pages/onboarding";
 import DashboardPage from "@/pages/dashboard";
 import SettingsPage from "@/pages/settings";
-import SenderAccountsPage from "@/pages/sender-accounts";
 import TeamPage from "@/pages/team";
 import CampaignsPage from "@/pages/campaigns";
 import ImportPage from "@/pages/import";
@@ -95,14 +94,6 @@ export default function App() {
         element={
           <AuthGate>
             <AnalyticsPage />
-          </AuthGate>
-        }
-      />
-      <Route
-        path="/sender-accounts"
-        element={
-          <AuthGate>
-            <SenderAccountsPage />
           </AuthGate>
         }
       />

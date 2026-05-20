@@ -1,6 +1,5 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
 import {
   Rocket,
@@ -32,20 +31,23 @@ import { Spinner } from "@/components/ui/spinner";
 import { processTemplate } from "@/lib/template";
 import { calculateScheduledDate } from "@/lib/sequence-presets";
 import { cn } from "@/lib/utils";
-import type { SenderOption, WizardState } from "./types";
+import type { WizardState } from "./types";
 
 type LaunchPhase =
   | "idle"
   | "saving"
-  | "create-contacts"
-  | "send-step1"
-  | "schedule-followups"
+  | "create-campaign"
+  | "save-sequence"
+  | "add-leads"
+  | "set-sender"
+  | "schedule"
   | "complete";
 
 interface PhaseResult {
-  contactsCreated?: number;
-  step1Sent?: number;
-  followupsScheduled?: number;
+  smartleadCampaignId?: string;
+  leadsAdded?: number;
+  sequenceSteps?: number;
+  scheduled?: boolean;
 }
 
 export function StepLaunch({
@@ -68,19 +70,6 @@ export function StepLaunch({
   const [launchedCampaignId, setLaunchedCampaignId] = useState<string | null>(null);
   const [phaseResult, setPhaseResult] = useState<PhaseResult>({});
 
-  const { data: sender } = useQuery<SenderOption | null>({
-    queryKey: ["sender-account", state.senderAccountId],
-    enabled: !!state.senderAccountId,
-    queryFn: async () => {
-      const { data } = await supabase
-        .from("sender_accounts")
-        .select("id, sender_name, sender_email, reply_to_email, is_default")
-        .eq("id", state.senderAccountId!)
-        .maybeSingle();
-      return (data ?? null) as SenderOption | null;
-    },
-  });
-
   const selectedLeads = state.leads.filter((_, i) =>
     state.selectedLeadIds.has(String(i)),
   );
@@ -88,8 +77,8 @@ export function StepLaunch({
   const launched = phase === "complete";
 
   const handleLaunch = async () => {
-    if (!orgId || !sender) {
-      toast.error("Missing organization or sender account");
+    if (!orgId) {
+      toast.error("Missing organization");
       return;
     }
     if (selectedLeads.length === 0) {
@@ -116,9 +105,9 @@ export function StepLaunch({
           name: state.campaignName.trim(),
           status: "active",
           source: state.sourceTab === "lusha" ? "lusha" : "import",
-          sender_email: sender.sender_email,
-          sender_name: sender.sender_name,
-          reply_to_email: state.reply_to_email || sender.sender_email,
+          sender_email: "b2b@etriplesoft.com",
+          sender_name: "b2b",
+          reply_to_email: state.reply_to_email || "b2b@etriplesoft.com",
           timezone: state.timezone,
           leads_added: selectedLeads.length,
           leads_searched: leadsSearched,
@@ -164,37 +153,43 @@ export function StepLaunch({
       const { error: seqError } = await supabase.from("sequences").insert(sequenceRows);
       if (seqError) throw seqError;
 
-      // Call send-campaign edge function
-      setPhase("create-contacts");
+      // Call send-campaign edge function (SmartLead)
+      setPhase("create-campaign");
       let fnData: any;
       try {
         const { data, error } = await supabase.functions.invoke("send-campaign", {
           body: { campaign_id: campaign.id },
         });
         if (error) throw error;
+        // Check if the response itself contains an error
+        if (data?.error) {
+          throw new Error(data.error);
+        }
         fnData = data;
       } catch (fnError: any) {
-        console.warn("send-campaign function failed", fnError);
-        toast.warning(
-          "Campaign saved, but the send-campaign Edge Function isn't deployed yet — emails were not sent.",
-        );
-        setPhase("complete");
-        setLaunchedCampaignId(campaign.id);
-        setState((p) => ({ ...p, campaignId: campaign.id }));
-        toast.success("Campaign saved!");
+        const msg = fnError?.message || fnError?.error || String(fnError);
+        console.error("send-campaign function failed:", fnError);
+        setLaunchError(`SmartLead error: ${msg}`);
+        toast.error(`Campaign saved but sending failed: ${msg}`);
+        setPhase("idle");
         return;
       }
 
       setPhaseResult({
-        contactsCreated: fnData?.contacts_created ?? 0,
-        step1Sent: fnData?.step1_sent ?? 0,
-        followupsScheduled: fnData?.scheduled_followups ?? 0,
+        smartleadCampaignId: fnData?.smartlead_campaign_id,
+        leadsAdded: fnData?.leads_added ?? 0,
+        sequenceSteps: fnData?.sequence_steps ?? 0,
+        scheduled: fnData?.scheduled ?? false,
       });
 
       await sleep(300);
-      setPhase("send-step1");
+      setPhase("save-sequence");
       await sleep(300);
-      setPhase("schedule-followups");
+      setPhase("add-leads");
+      await sleep(300);
+      setPhase("set-sender");
+      await sleep(300);
+      setPhase("schedule");
       await sleep(300);
 
       // Increment usage
@@ -224,7 +219,7 @@ export function StepLaunch({
           <SummaryRow label="Campaign name" value={state.campaignName} />
           <SummaryRow
             label="Sender"
-            value={sender ? `${sender.sender_name} ${sender.sender_email}` : "—"}
+            value="b2b@etriplesoft.com (SmartLead SMTP)"
           />
           <SummaryRow label="Timezone" value={state.timezone} />
           <SummaryRow label="Leads" value={String(selectedLeads.length)} />
@@ -305,7 +300,7 @@ export function StepLaunch({
           <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
           <div>
             This will send emails to <strong>{selectedLeads.length}</strong> contacts from{" "}
-            <strong>{sender?.sender_email ?? "your sender"}</strong>. Step 1 sends immediately;
+            <strong>b2b@etriplesoft.com</strong>. Step 1 sends immediately;
             steps 2+ are scheduled.
           </div>
         </div>
@@ -319,33 +314,54 @@ export function StepLaunch({
               iconDone={<CheckCircle2 className="h-4 w-4 text-emerald-500" />}
               label="Saving campaign…"
               active={phase === "saving"}
-              done={["create-contacts", "send-step1", "schedule-followups", "complete"].includes(phase)}
+              done={["create-campaign", "save-sequence", "add-leads", "set-sender", "schedule", "complete"].includes(phase)}
             />
             <ProgressRow
-              icon={<Users className="h-4 w-4 text-primary" />}
+              icon={<Rocket className="h-4 w-4 text-primary" />}
               iconDone={<CheckCircle2 className="h-4 w-4 text-emerald-500" />}
-              label={`Creating contacts in Resend${phaseResult.contactsCreated ? ` (${phaseResult.contactsCreated} created)` : ""}…`}
-              active={phase === "create-contacts"}
-              done={["send-step1", "schedule-followups", "complete"].includes(phase)}
+              label={`Creating SmartLead campaign${phaseResult.smartleadCampaignId ? ` (#${phaseResult.smartleadCampaignId})` : ""}…`}
+              active={phase === "create-campaign"}
+              done={["save-sequence", "add-leads", "set-sender", "schedule", "complete"].includes(phase)}
             />
             <ProgressRow
               icon={<Mail className="h-4 w-4 text-primary" />}
               iconDone={<CheckCircle2 className="h-4 w-4 text-emerald-500" />}
-              label={`Sending Step 1 emails${phaseResult.step1Sent ? ` (${phaseResult.step1Sent} sent)` : ""}…`}
-              active={phase === "send-step1"}
-              done={["schedule-followups", "complete"].includes(phase)}
+              label={`Saving email sequence${phaseResult.sequenceSteps ? ` (${phaseResult.sequenceSteps} steps)` : ""}…`}
+              active={phase === "save-sequence"}
+              done={["add-leads", "set-sender", "schedule", "complete"].includes(phase)}
+            />
+            <ProgressRow
+              icon={<Users className="h-4 w-4 text-primary" />}
+              iconDone={<CheckCircle2 className="h-4 w-4 text-emerald-500" />}
+              label={`Adding leads${phaseResult.leadsAdded ? ` (${phaseResult.leadsAdded} leads)` : ""}…`}
+              active={phase === "add-leads"}
+              done={["set-sender", "schedule", "complete"].includes(phase)}
+            />
+            <ProgressRow
+              icon={<Mail className="h-4 w-4 text-primary" />}
+              iconDone={<CheckCircle2 className="h-4 w-4 text-emerald-500" />}
+              label="Setting sender account…"
+              active={phase === "set-sender"}
+              done={["schedule", "complete"].includes(phase)}
             />
             <ProgressRow
               icon={<CalendarClock className="h-4 w-4 text-primary" />}
               iconDone={<CheckCircle2 className="h-4 w-4 text-emerald-500" />}
-              label={`Scheduling follow-up sequences${phaseResult.followupsScheduled ? ` (${phaseResult.followupsScheduled} scheduled)` : ""}…`}
-              active={phase === "schedule-followups"}
+              label="Scheduling campaign…"
+              active={phase === "schedule"}
               done={phase === "complete"}
             />
             {phase === "complete" && (
               <div className="mt-2 flex items-center gap-2 rounded-md bg-emerald-50 p-3 text-sm font-medium text-emerald-700">
                 <PartyPopper className="h-5 w-5" />
-                Campaign launched!
+                <div>
+                  Campaign launched on SmartLead!
+                  {phaseResult.smartleadCampaignId && (
+                    <span className="ml-1 text-xs text-emerald-600">
+                      (ID: {phaseResult.smartleadCampaignId})
+                    </span>
+                  )}
+                </div>
               </div>
             )}
           </CardContent>
@@ -378,10 +394,10 @@ export function StepLaunch({
         ) : (
           <Button
             onClick={handleLaunch}
-            disabled={phase !== "idle" || selectedLeads.length === 0 || !sender}
+            disabled={phase !== "idle" || selectedLeads.length === 0}
             className={cn(phase !== "idle" && "bg-primary/80")}
           >
-            {phase !== "idle" && phase !== "complete" ? (
+            {phase !== "idle" ? (
               <Spinner />
             ) : (
               <Rocket className="h-4 w-4" />

@@ -6,7 +6,6 @@ import {
   Users,
   Upload,
   BarChart3,
-  Mail,
   Settings,
   UsersRound,
   Search,
@@ -47,7 +46,6 @@ const NAV: NavItem[] = [
   { label: "Leads", to: "/leads", icon: Users },
   { label: "Import Leads", to: "/import", icon: Upload },
   { label: "Analytics", to: "/analytics", icon: BarChart3 },
-  { label: "Sender Accounts", to: "/sender-accounts", icon: Mail },
   { label: "Settings", to: "/settings", icon: Settings },
   { label: "Team", to: "/team", icon: UsersRound },
 ];
@@ -59,7 +57,6 @@ const PAGE_TITLES: Record<string, string> = {
   "/leads": "Leads",
   "/import": "Import Leads",
   "/analytics": "Analytics",
-  "/sender-accounts": "Sender Accounts",
   "/settings": "Settings",
   "/team": "Team",
 };

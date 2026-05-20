@@ -1,13 +1,16 @@
 // Supabase Edge Function: send-campaign
 //
 // Reads a campaign + its sequences + verified leads, then:
-//   1. Creates Resend audience contacts for each lead
-//   2. Sends Step 1 emails immediately
-//   3. Schedules follow-up steps (2+) using scheduled_at
+//   1. Creates a SmartLead campaign
+//   2. Saves the email sequence
+//   3. Adds leads to the campaign
+//   4. Assigns the email account to the campaign
+//   5. Updates campaign settings
+//   6. Schedules the campaign
 //
 // Deploy:
 //   supabase functions deploy send-campaign
-//   supabase secrets set RESEND_API_KEY=re_...
+//   supabase secrets set SMARTLEAD_API_KEY=your_key_here
 //
 // Invoke from the app:
 //   supabase.functions.invoke("send-campaign", { body: { campaign_id } })
@@ -33,44 +36,40 @@ interface SequenceRow {
   body: string;
 }
 
-const RESEND_API = "https://api.resend.com";
+const SMARTLEAD_API = "https://server.smartlead.ai/api/v1";
 
-function processTemplate(template: string, lead: Lead): string {
+// Convert app template vars {{first_name}} -> {{firstName}} for SmartLead
+function toSmartleadVars(template: string): string {
   const map: Record<string, string> = {
-    first_name: lead.first_name ?? lead.full_name?.split(" ")[0] ?? "",
-    last_name:
-      lead.last_name ?? lead.full_name?.split(" ").slice(1).join(" ") ?? "",
-    full_name: lead.full_name ?? `${lead.first_name ?? ""} ${lead.last_name ?? ""}`.trim(),
-    company: lead.company ?? "",
-    title: lead.job_title ?? "",
-    job_title: lead.job_title ?? "",
-    location: lead.location ?? "",
-    email: lead.email ?? "",
+    first_name: "firstName",
+    last_name: "lastName",
+    full_name: "fullName",
+    company: "companyName",
+    job_title: "title",
+    title: "title",
+    location: "location",
+    email: "email",
   };
   let out = template;
-  for (const [k, v] of Object.entries(map)) {
-    out = out.replace(new RegExp(`\\{\\{\\s*${k}\\s*\\}\\}`, "gi"), v);
+  for (const [snake, camel] of Object.entries(map)) {
+    out = out.replace(
+      new RegExp(`\\{\\{\\s*${snake}\\s*\\}\\}`, "gi"),
+      `{{${camel}}}`,
+    );
   }
   return out;
 }
 
-function calculateScheduledDate(prevDelays: number[]): string {
-  const totalDays = prevDelays.reduce((sum, d) => sum + (d || 0), 0);
-  const date = new Date();
-  date.setUTCDate(date.getUTCDate() + totalDays);
-  return date.toISOString();
-}
-
-async function resendFetch(
+async function smartleadFetch(
   path: string,
   apiKey: string,
   init: RequestInit = {},
 ): Promise<Response> {
-  return fetch(`${RESEND_API}${path}`, {
+  const separator = path.includes("?") ? "&" : "?";
+  return fetch(`${SMARTLEAD_API}${path}${separator}api_key=${apiKey}`, {
     ...init,
     headers: {
       "Content-Type": "application/json",
-      Authorization: `Bearer ${apiKey}`,
       ...(init.headers ?? {}),
     },
   });
@@ -90,14 +89,15 @@ Deno.serve(async (req) => {
 
     const supabaseUrl = Deno.env.get("SUPABASE_URL");
     const supabaseKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
-    const resendKey = Deno.env.get("RESEND_API_KEY");
+    const smartleadKey = Deno.env.get("SMARTLEAD_API_KEY");
     if (!supabaseUrl || !supabaseKey) {
       return json({ error: "Supabase env vars missing" }, 500);
     }
-    if (!resendKey) {
+    if (!smartleadKey) {
       return json(
         {
-          error: "RESEND_API_KEY not configured. Run: supabase secrets set RESEND_API_KEY=re_...",
+          error:
+            "SMARTLEAD_API_KEY not configured. Run: supabase secrets set SMARTLEAD_API_KEY=your_key_here",
         },
         500,
       );
@@ -106,10 +106,15 @@ Deno.serve(async (req) => {
     const { campaign_id } = await req.json();
     if (!campaign_id) return json({ error: "campaign_id is required" }, 400);
 
-    const userClient = createClient(supabaseUrl, Deno.env.get("SUPABASE_ANON_KEY") ?? "", {
-      global: { headers: { Authorization: auth } },
-    });
+    const userClient = createClient(
+      supabaseUrl,
+      Deno.env.get("SUPABASE_ANON_KEY") ?? "",
+      {
+        global: { headers: { Authorization: auth } },
+      },
+    );
 
+    // 1. Fetch campaign from DB
     const { data: campaign, error: campaignError } = await userClient
       .from("campaigns")
       .select(
@@ -118,25 +123,23 @@ Deno.serve(async (req) => {
       .eq("id", campaign_id)
       .maybeSingle();
     if (campaignError || !campaign) {
-      return json({ error: campaignError?.message ?? "Campaign not found" }, 404);
+      return json(
+        { error: campaignError?.message ?? "Campaign not found" },
+        404,
+      );
     }
 
-    // Fetch the org's Resend audience ID from settings
-    const { data: audienceSetting } = await userClient
-      .from("settings")
-      .select("value")
-      .eq("org_id", campaign.org_id)
-      .eq("key", "resend_audience_id")
-      .maybeSingle();
-    const audienceId = (audienceSetting as { value?: string })?.value ?? null;
-
+    // 2. Fetch leads
     const { data: leads, error: leadsError } = await userClient
       .from("leads")
-      .select("id, email, first_name, last_name, full_name, company, job_title, location")
+      .select(
+        "id, email, first_name, last_name, full_name, company, job_title, location",
+      )
       .eq("campaign_id", campaign_id)
       .eq("added_to_campaign", true);
     if (leadsError) return json({ error: leadsError.message }, 500);
 
+    // 3. Fetch sequences
     const { data: sequences, error: sequencesError } = await userClient
       .from("sequences")
       .select("step, delay_days, subject, body")
@@ -147,107 +150,215 @@ Deno.serve(async (req) => {
       return json({ error: "No sequence steps for this campaign" }, 400);
     }
 
-    const fromHeader = `${campaign.sender_name ?? "Sender"} <${campaign.sender_email}>`;
-    const replyTo = campaign.reply_to_email ?? campaign.sender_email;
-    const orgId = campaign.org_id ?? "";
+    // ── Step A: Create SmartLead campaign ──
+    const createRes = await smartleadFetch("/campaigns/create", smartleadKey, {
+      method: "POST",
+      body: JSON.stringify({ name: campaign.name }),
+    });
+    if (!createRes.ok) {
+      const txt = await createRes.text();
+      return json(
+        { error: `SmartLead create campaign failed (${createRes.status}): ${txt.slice(0, 500)}` },
+        502,
+      );
+    }
+    const created = await createRes.json();
+    const slCampaignId = created.id ?? created.campaign?.id;
+    if (!slCampaignId) {
+      return json(
+        { error: "SmartLead did not return a campaign ID", raw: created },
+        502,
+      );
+    }
 
-    let contactsCreated = 0;
-    let stepOneSent = 0;
-    let followupsScheduled = 0;
-    const errors: string[] = [];
-
-    for (const lead of (leads ?? []) as Lead[]) {
-      // 0. Create contact in Resend audience (if audience ID is configured)
-      if (audienceId) {
-        try {
-          await resendFetch(`/contacts`, resendKey, {
-            method: "POST",
-            body: JSON.stringify({
-              audience_id: audienceId,
-              email: lead.email,
-              first_name: lead.first_name ?? "",
-              last_name: lead.last_name ?? "",
-              unsubscribed: false,
-            }),
-          });
-        } catch {
-          // non-fatal — contact creation is best-effort
-        }
-      }
-      contactsCreated++;
-
-      // 1. Step 1: send immediately
-      const first = sequences[0] as SequenceRow;
-      const html = processTemplate(first.body, lead).replace(/\n/g, "<br>");
-      const subject = processTemplate(first.subject, lead);
-
-      const r1 = await resendFetch("/emails", resendKey, {
+    // ── Step B: Save email sequence ──
+    const seqPayload = {
+      sequences: (sequences as SequenceRow[]).map((s) => ({
+        seq_number: s.step,
+        seq_delay_details: { delay_in_days: s.delay_days ?? 0 },
+        subject: toSmartleadVars(s.subject),
+        email_body: toSmartleadVars(s.body).replace(/\n/g, "<br>"),
+      })),
+    };
+    const seqRes = await smartleadFetch(
+      `/campaigns/${slCampaignId}/sequences`,
+      smartleadKey,
+      {
         method: "POST",
-        body: JSON.stringify({
-          from: fromHeader,
-          to: [lead.email],
-          reply_to: replyTo,
-          subject,
-          html,
-          tags: [
-            { name: "campaign_id", value: campaign.id },
-            { name: "lead_id", value: lead.id },
-            { name: "step", value: "1" },
-            { name: "org_id", value: orgId },
-          ],
-        }),
-      });
-      if (r1.ok) {
-        stepOneSent++;
-      } else {
-        const text = await r1.text();
-        errors.push(`step1 ${lead.email}: ${text.slice(0, 200)}`);
-        continue;
-      }
+        body: JSON.stringify(seqPayload),
+      },
+    );
+    if (!seqRes.ok) {
+      const txt = await seqRes.text();
+      return json(
+        { error: `SmartLead save sequence failed (${seqRes.status}): ${txt.slice(0, 500)}` },
+        502,
+      );
+    }
 
-      // 2. Steps 2+: schedule
-      for (let i = 1; i < sequences.length; i++) {
-        const seq = sequences[i] as SequenceRow;
-        const scheduled = calculateScheduledDate(
-          sequences.slice(0, i + 1).map((s) => s.delay_days ?? 0),
-        );
-        const r = await resendFetch("/emails", resendKey, {
-          method: "POST",
-          body: JSON.stringify({
-            from: fromHeader,
-            to: [lead.email],
-            reply_to: replyTo,
-            subject: processTemplate(seq.subject, lead),
-            html: processTemplate(seq.body, lead).replace(/\n/g, "<br>"),
-            scheduled_at: scheduled,
-            tags: [
-              { name: "campaign_id", value: campaign.id },
-              { name: "lead_id", value: lead.id },
-              { name: "step", value: String(i + 1) },
-              { name: "org_id", value: orgId },
-            ],
-          }),
-        });
-        if (r.ok) followupsScheduled++;
-        else {
-          const text = await r.text();
-          errors.push(`step${i + 1} ${lead.email}: ${text.slice(0, 200)}`);
-        }
+    // ── Step C: Add leads ──
+    const leadsPayload = {
+      lead_list: (leads as Lead[]).map((l) => ({
+        email: l.email,
+        first_name: l.first_name ?? l.full_name?.split(" ")[0] ?? "",
+        last_name:
+          l.last_name ?? l.full_name?.split(" ").slice(1).join(" ") ?? "",
+        company_name: l.company ?? "",
+        location: l.location ?? "",
+        custom_fields: {
+          ...(l.job_title ? { job_title: l.job_title } : {}),
+        },
+      })),
+      settings: {
+        ignore_global_block_list: false,
+        ignore_unsubscribe_list: false,
+        ignore_community_bounce_list: false,
+        ignore_duplicate_leads_in_other_campaign: false,
+      },
+    };
+    const leadsRes = await smartleadFetch(
+      `/campaigns/${slCampaignId}/leads`,
+      smartleadKey,
+      {
+        method: "POST",
+        body: JSON.stringify(leadsPayload),
+      },
+    );
+    if (!leadsRes.ok) {
+      const txt = await leadsRes.text();
+      return json(
+        { error: `SmartLead add leads failed (${leadsRes.status}): ${txt.slice(0, 500)}` },
+        502,
+      );
+    }
+
+    // ── Step D: Fetch email accounts and assign to campaign ──
+    const accountsRes = await smartleadFetch(
+      "/email-accounts/",
+      smartleadKey,
+      { method: "GET" },
+    );
+    let emailAccountId: number | null = null;
+    if (accountsRes.ok) {
+      const accounts = await accountsRes.json();
+      // Find the account matching b2b@etriplesoft.com
+      const target = Array.isArray(accounts)
+        ? accounts.find(
+            (a: any) =>
+              a.from_email === "b2b@etriplesoft.com" ||
+              a.email === "b2b@etriplesoft.com",
+          )
+        : null;
+      if (target) {
+        emailAccountId = target.id;
       }
     }
 
-    // Mark all selected leads as in-flight
-    await userClient
+    if (emailAccountId) {
+      const emailAccRes = await smartleadFetch(
+        `/campaigns/${slCampaignId}/email-accounts`,
+        smartleadKey,
+        {
+          method: "POST",
+          body: JSON.stringify({
+            email_account_ids: [emailAccountId],
+          }),
+        },
+      );
+      if (!emailAccRes.ok) {
+        const txt = await emailAccRes.text();
+        console.error("SmartLead assign email account failed:", txt);
+      }
+    } else {
+      console.warn(
+        "Could not find email account for b2b@etriplesoft.com — campaign may have no sender",
+      );
+    }
+
+    // ── Step E: Update campaign settings ──
+    const settingsRes = await smartleadFetch(
+      `/campaigns/${slCampaignId}/settings`,
+      smartleadKey,
+      {
+        method: "POST",
+        body: JSON.stringify({
+          track_settings: [],
+          stop_lead_settings: "REPLY_TO_AN_EMAIL",
+          send_as_plain_text: false,
+          enable_ai_esp_matching: true,
+        }),
+      },
+    );
+    if (!settingsRes.ok) {
+      const txt = await settingsRes.text();
+      console.error("SmartLead update settings failed:", txt);
+      // Non-fatal
+    }
+
+    // ── Step F: Schedule campaign ──
+    const tz = campaign.timezone || "UTC";
+    const scheduleRes = await smartleadFetch(
+      `/campaigns/${slCampaignId}/schedule`,
+      smartleadKey,
+      {
+        method: "POST",
+        body: JSON.stringify({
+          timezone: tz,
+          days_of_the_week: [1, 2, 3, 4, 5],
+          start_hour: "09:00",
+          end_hour: "17:00",
+          min_time_btw_emails: 10,
+          max_new_leads_per_day: 50,
+        }),
+      },
+    );
+    if (!scheduleRes.ok) {
+      const txt = await scheduleRes.text();
+      console.error("SmartLead schedule failed:", txt);
+      return json(
+        { error: `SmartLead schedule failed (${scheduleRes.status}): ${txt.slice(0, 500)}` },
+        502,
+      );
+    }
+
+    // ── Step G: Start campaign ──
+    const startRes = await smartleadFetch(
+      `/campaigns/${slCampaignId}/status`,
+      smartleadKey,
+      {
+        method: "POST",
+        body: JSON.stringify({ status: "START" }),
+      },
+    );
+    const startTxt = await startRes.text();
+    console.log("SmartLead start response:", startRes.status, startTxt);
+
+    // ── Update local DB ──
+    const { error: updateCampaignErr } = await userClient
+      .from("campaigns")
+      .update({ status: "active" } as any)
+      .eq("id", campaign_id);
+    if (updateCampaignErr) {
+      console.error("Failed to update campaign status:", updateCampaignErr);
+    }
+
+    const { error: updateLeadsErr } = await userClient
       .from("leads")
       .update({ email_delivered: false, current_step: 1 })
       .eq("campaign_id", campaign_id);
+    if (updateLeadsErr) {
+      console.error("Failed to update leads status:", updateLeadsErr);
+    }
 
     return json({
       ok: true,
-      contacts_created: contactsCreated,
-      step1_sent: stepOneSent,
-      scheduled_followups: followupsScheduled,
-      errors: errors.slice(0, 10),
+      smartlead_campaign_id: slCampaignId,
+      leads_added: (leads as Lead[]).length,
+      sequence_steps: (sequences as SequenceRow[]).length,
+      sender_email: "b2b@etriplesoft.com",
+      email_account_id: emailAccountId,
+      scheduled: true,
+      start_response: startTxt,
     });
   } catch (e: any) {
     return json({ error: e?.message ?? String(e) }, 500);
@@ -265,6 +376,7 @@ function corsHeaders(): Record<string, string> {
   return {
     "Access-Control-Allow-Origin": "*",
     "Access-Control-Allow-Methods": "POST, OPTIONS",
-    "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
+    "Access-Control-Allow-Headers":
+      "authorization, x-client-info, apikey, content-type",
   };
 }
