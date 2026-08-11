@@ -56,7 +56,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   const refresh = async () => {
-    if (session?.user) await loadProfile(session.user.id);
+    // Re-fetch the session rather than trusting the `session` closure — a
+    // caller that just called supabase.auth.signUp()/signInWithPassword()
+    // may invoke refresh() before the onAuthStateChange listener below has
+    // had a chance to update it, which would otherwise make this a no-op.
+    const {
+      data: { session: s },
+    } = await supabase.auth.getSession();
+    setSession(s);
+    if (s?.user) await loadProfile(s.user.id);
+    else {
+      setProfile(null);
+      setOrganization(null);
+    }
   };
 
   useEffect(() => {

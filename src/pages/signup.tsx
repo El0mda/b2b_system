@@ -1,6 +1,5 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { Rocket } from "lucide-react";
 import { toast } from "sonner";
 
 import { supabase } from "@/lib/supabase";
@@ -9,6 +8,10 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Spinner } from "@/components/ui/spinner";
+import { ThemeToggle } from "@/components/layout/theme-toggle";
+import { AuthBackdrop } from "@/components/layout/auth-backdrop";
+import logo from "@/assets/company_logo.png";
+import logoDark from "@/assets/company_logo_dark.png";
 
 function slugify(s: string) {
   const base = s
@@ -23,7 +26,7 @@ function slugify(s: string) {
 
 export default function SignupPage() {
   const navigate = useNavigate();
-  const { session, profile, loading } = useAuth();
+  const { session, profile, loading, refresh } = useAuth();
 
   const [fullName, setFullName] = useState("");
   const [companyName, setCompanyName] = useState("");
@@ -31,14 +34,22 @@ export default function SignupPage() {
   const [password, setPassword] = useState("");
   const [submitting, setSubmitting] = useState(false);
 
+  // Once the form has been submitted, handleSubmit owns navigation from here
+  // on — without this guard, this effect fires as soon as signUp() resolves
+  // (session becomes non-null) but before handleSubmit has finished creating
+  // the org/profile rows, sending the user to /onboarding's "no workspace"
+  // fallback instead of the flow handleSubmit is about to navigate to.
+  const submittedRef = useRef(false);
+
   useEffect(() => {
-    if (loading || !session) return;
+    if (loading || !session || submittedRef.current) return;
     if (profile?.org_id) navigate("/dashboard", { replace: true });
     else navigate("/onboarding", { replace: true });
   }, [loading, session, profile, navigate]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    submittedRef.current = true;
     if (!fullName || !companyName || !email || !password) {
       toast.error("All fields are required");
       return;
@@ -68,24 +79,27 @@ export default function SignupPage() {
         return;
       }
 
-      // Create org
-      const { data: org, error: orgError } = await supabase
+      // Create org. We generate the id client-side and skip .select() here:
+      // the org's SELECT policy depends on current_org_id(), which reads
+      // users.org_id — but that row doesn't exist until the insert below,
+      // so reading the just-inserted org back (RETURNING) would fail RLS.
+      const orgId = crypto.randomUUID();
+      const { error: orgError } = await supabase
         .from("organizations")
-        .insert({ name: companyName, slug: slugify(companyName) })
-        .select()
-        .single();
+        .insert({ id: orgId, name: companyName, slug: slugify(companyName) });
       if (orgError) throw orgError;
 
       // Create user profile linked to org as owner
       const { error: profileError } = await supabase.from("users").insert({
         id: user.id,
-        org_id: org.id,
+        org_id: orgId,
         full_name: fullName,
         email,
         role: "owner",
       });
       if (profileError) throw profileError;
 
+      await refresh();
       toast.success("Welcome to Campaign Commander!");
       navigate("/onboarding", { replace: true });
     } catch (e: any) {
@@ -96,22 +110,26 @@ export default function SignupPage() {
   };
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-gradient-to-br from-indigo-50 via-white to-blue-50 p-4">
-      <div className="w-full max-w-md">
-        <div className="mb-8 text-center">
-          <div className="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-xl bg-primary">
-            <Rocket className="h-6 w-6 text-white" />
-          </div>
-          <h1 className="text-2xl font-bold">Campaign Commander</h1>
-          <p className="mt-1 text-sm text-muted-foreground">
-            Outbound sales automation, all in one place.
+    <div className="relative flex min-h-screen items-center justify-center overflow-hidden bg-background p-4">
+      <AuthBackdrop />
+
+      <div className="absolute right-4 top-4 z-10">
+        <ThemeToggle className="border border-border bg-card/60 backdrop-blur" />
+      </div>
+
+      <div className="relative z-10 w-full max-w-md animate-slide-up">
+        <div className="mb-8 flex flex-col items-center text-center">
+          <img src={logo} alt="etriplesoft" className="h-9 w-auto dark:hidden" />
+          <img src={logoDark} alt="etriplesoft" className="hidden h-9 w-auto dark:block" />
+          <p className="mt-3 text-sm text-muted-foreground">
+            Campaign Commander — outbound automation for the team.
           </p>
         </div>
 
-        <div className="rounded-xl border border-border bg-card p-6 shadow-sm">
-          <h2 className="mb-1 text-lg font-semibold">Create your account</h2>
-          <p className="mb-5 text-sm text-muted-foreground">
-            Start your free workspace in under a minute.
+        <div className="rounded-2xl border border-border bg-card/80 p-7 shadow-premium-lg backdrop-blur-sm">
+          <h2 className="mb-1 text-xl font-semibold tracking-tight">Create your account</h2>
+          <p className="mb-6 text-sm text-muted-foreground">
+            Set up your workspace in under a minute.
           </p>
           <form onSubmit={handleSubmit} className="space-y-4">
             <div className="space-y-1.5">

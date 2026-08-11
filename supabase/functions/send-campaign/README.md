@@ -46,4 +46,4 @@ curl -X POST http://localhost:54321/functions/v1/send-campaign \
 
 - It expects `SMARTLEAD_API_KEY` in env. Without it, the function 500s with a clear message.
 - Auth is forwarded — the function uses the **caller's JWT** to query Supabase, so RLS still applies. The user can only launch campaigns from their own org.
-- All emails are sent from `b2b@etriplesoft.com` via the SmartLead SMTP sender account.
+- All emails are sent from `leads@etriplesoft.com` via the SmartLead SMTP sender account.

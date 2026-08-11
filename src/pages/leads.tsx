@@ -244,7 +244,7 @@ export default function LeadsPage() {
                     <Td className="text-muted-foreground">{l.job_title ?? "—"}</Td>
                     <Td className="text-muted-foreground">{l.campaigns?.name ?? "—"}</Td>
                     <Td>
-                      <Badge className={l.source === "lusha" ? "bg-blue-100 text-blue-700" : l.source === "import" ? "bg-purple-100 text-purple-700" : "bg-gray-100 text-gray-700"}>
+                      <Badge className={l.source === "lusha" ? "bg-blue-500/15 text-blue-600 dark:text-blue-400" : l.source === "import" ? "bg-purple-500/15 text-purple-600 dark:text-purple-400" : "bg-muted text-muted-foreground"}>
                         {l.source ?? "manual"}
                       </Badge>
                     </Td>
@@ -321,16 +321,16 @@ function NBBadge({ result, valid }: { result: string | null; valid: boolean | nu
 function EngagementIcons({ lead }: { lead: LeadRow }) {
   return (
     <div className="flex items-center gap-1.5">
-      <span className={cn("text-sm", lead.email_delivered ? "text-emerald-500" : "text-gray-300")}>
+      <span className={cn("text-sm", lead.email_delivered ? "text-emerald-500" : "text-muted-foreground/30")}>
         <MailCheck className="h-4 w-4" />
       </span>
-      <span className={cn("text-sm", lead.email_opened ? "text-amber-500" : "text-gray-300")}>
+      <span className={cn("text-sm", lead.email_opened ? "text-amber-500" : "text-muted-foreground/30")}>
         <Eye className="h-4 w-4" />
       </span>
-      <span className={cn("text-sm", lead.email_clicked ? "text-blue-500" : "text-gray-300")}>
+      <span className={cn("text-sm", lead.email_clicked ? "text-blue-500" : "text-muted-foreground/30")}>
         <MousePointerClick className="h-4 w-4" />
       </span>
-      <span className={cn("text-sm", lead.replied_at ? "text-purple-500" : "text-gray-300")}>
+      <span className={cn("text-sm", lead.replied_at ? "text-purple-500" : "text-muted-foreground/30")}>
         <MessageSquare className="h-4 w-4" />
       </span>
     </div>
@@ -341,7 +341,7 @@ function LeadSlideOver({ lead, onClose }: { lead: LeadRow; onClose: () => void }
   return (
     <div className="fixed inset-0 z-50 flex justify-end">
       <div className="absolute inset-0 bg-black/30" onClick={onClose} />
-      <div className="relative flex h-full w-full max-w-lg flex-col bg-white shadow-xl">
+      <div className="relative flex h-full w-full max-w-lg flex-col bg-card shadow-2xl">
         <div className="flex items-center justify-between border-b border-border px-6 py-4">
           <div>
             <h3 className="text-lg font-semibold">
@@ -391,7 +391,7 @@ function LeadSlideOver({ lead, onClose }: { lead: LeadRow; onClose: () => void }
           <div className="space-y-2">
             <h4 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Odoo CRM</h4>
             {lead.synced_to_odoo ? (
-              <div className="flex items-center gap-2 rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-700">
+              <div className="flex items-center gap-2 rounded-lg border border-emerald-500/20 bg-emerald-500/10 p-3 text-sm text-emerald-700 dark:text-emerald-400">
                 <CheckCircle2 className="h-4 w-4" /> Synced to Odoo
               </div>
             ) : (

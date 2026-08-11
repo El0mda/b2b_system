@@ -32,11 +32,11 @@ import { cn } from "@/lib/utils";
 
 const STATUS_BADGE: Record<string, { className: string; pulse?: boolean }> = {
   draft: { className: "bg-muted text-muted-foreground" },
-  searching: { className: "bg-blue-100 text-blue-700", pulse: true },
-  enriching: { className: "bg-purple-100 text-purple-700", pulse: true },
-  active: { className: "bg-emerald-100 text-emerald-700" },
-  paused: { className: "bg-amber-100 text-amber-700" },
-  completed: { className: "bg-gray-200 text-gray-700" },
+  searching: { className: "bg-blue-500/15 text-blue-600 dark:text-blue-400", pulse: true },
+  enriching: { className: "bg-purple-500/15 text-purple-600 dark:text-purple-400", pulse: true },
+  active: { className: "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400" },
+  paused: { className: "bg-amber-500/15 text-amber-600 dark:text-amber-400" },
+  completed: { className: "bg-muted text-muted-foreground" },
 };
 
 interface StatCardProps {

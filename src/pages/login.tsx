@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { Rocket } from "lucide-react";
+import { ArrowRight } from "lucide-react";
 import { toast } from "sonner";
 
 import { supabase } from "@/lib/supabase";
@@ -9,10 +9,14 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Spinner } from "@/components/ui/spinner";
+import { ThemeToggle } from "@/components/layout/theme-toggle";
+import { AuthBackdrop } from "@/components/layout/auth-backdrop";
+import logo from "@/assets/company_logo.png";
+import logoDark from "@/assets/company_logo_dark.png";
 
 export default function LoginPage() {
   const navigate = useNavigate();
-  const { session, profile, loading } = useAuth();
+  const { session, loading } = useAuth();
 
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -42,18 +46,23 @@ export default function LoginPage() {
   };
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-gradient-to-br from-indigo-50 via-white to-blue-50 p-4">
-      <div className="w-full max-w-md">
-        <div className="mb-8 text-center">
-          <div className="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-xl bg-primary">
-            <Rocket className="h-6 w-6 text-white" />
-          </div>
-          <h1 className="text-2xl font-bold">Campaign Commander</h1>
+    <div className="relative flex min-h-screen items-center justify-center overflow-hidden bg-background p-4">
+      <AuthBackdrop />
+
+      <div className="absolute right-4 top-4 z-10">
+        <ThemeToggle className="border border-border bg-card/60 backdrop-blur" />
+      </div>
+
+      <div className="relative z-10 w-full max-w-sm animate-slide-up">
+        <div className="mb-8 flex flex-col items-center text-center">
+          <img src={logo} alt="etriplesoft" className="h-9 w-auto dark:hidden" />
+          <img src={logoDark} alt="etriplesoft" className="hidden h-9 w-auto dark:block" />
+          <p className="mt-3 text-sm text-muted-foreground">Campaign Commander</p>
         </div>
 
-        <div className="rounded-xl border border-border bg-card p-6 shadow-sm">
-          <h2 className="mb-1 text-lg font-semibold">Sign in</h2>
-          <p className="mb-5 text-sm text-muted-foreground">Welcome back.</p>
+        <div className="rounded-2xl border border-border bg-card/80 p-7 shadow-premium-lg backdrop-blur-sm">
+          <h2 className="mb-1 text-xl font-semibold tracking-tight">Sign in</h2>
+          <p className="mb-6 text-sm text-muted-foreground">Welcome back — let's get to work.</p>
           <form onSubmit={handleSubmit} className="space-y-4">
             <div className="space-y-1.5">
               <Label htmlFor="email">Email</Label>
@@ -82,9 +91,10 @@ export default function LoginPage() {
             <Button type="submit" className="w-full" disabled={submitting}>
               {submitting && <Spinner />}
               Sign in
+              {!submitting && <ArrowRight className="h-4 w-4" />}
             </Button>
           </form>
-          <p className="mt-5 text-center text-sm text-muted-foreground">
+          <p className="mt-6 text-center text-sm text-muted-foreground">
             Don't have an account?{" "}
             <Link to="/signup" className="font-medium text-primary hover:underline">
               Sign up

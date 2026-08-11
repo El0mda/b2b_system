@@ -1,16 +1,6 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import {
-  Rocket,
-  Check,
-  ArrowRight,
-  ArrowLeft,
-  Sparkles,
-  Building2,
-  KeyRound,
-  Database,
-  SkipForward,
-} from "lucide-react";
+import { Check, ArrowRight, ArrowLeft, Sparkles, Building2, KeyRound, Rocket } from "lucide-react";
 import { toast } from "sonner";
 
 import { supabase } from "@/lib/supabase";
@@ -19,7 +9,11 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Spinner, FullPageSpinner } from "@/components/ui/spinner";
+import { ThemeToggle } from "@/components/layout/theme-toggle";
+import { AuthBackdrop } from "@/components/layout/auth-backdrop";
 import { cn } from "@/lib/utils";
+import logo from "@/assets/company_logo.png";
+import logoDark from "@/assets/company_logo_dark.png";
 
 function slugify(s: string) {
   const base = s
@@ -32,14 +26,13 @@ function slugify(s: string) {
   return base ? `${base}-${suffix}` : suffix;
 }
 
-type StepKey = "welcome" | "managed" | "odoo" | "done";
+type StepKey = "welcome" | "managed" | "done";
 
 interface Step {
   key: StepKey;
   label: string;
   description: string;
   icon: typeof Rocket;
-  optional?: boolean;
 }
 
 const STEPS: Step[] = [
@@ -56,13 +49,6 @@ const STEPS: Step[] = [
     icon: Sparkles,
   },
   {
-    key: "odoo",
-    label: "Odoo (optional)",
-    description: "Sync replies to Odoo CRM as opportunities.",
-    icon: Database,
-    optional: true,
-  },
-  {
     key: "done",
     label: "All set",
     description: "Your workspace is ready to launch campaigns.",
@@ -70,17 +56,19 @@ const STEPS: Step[] = [
   },
 ];
 
+function LogoMark() {
+  return (
+    <div className="mb-3 flex flex-col items-center">
+      <img src={logo} alt="etriplesoft" className="h-8 w-auto dark:hidden" />
+      <img src={logoDark} alt="etriplesoft" className="hidden h-8 w-auto dark:block" />
+    </div>
+  );
+}
+
 export default function OnboardingPage() {
   const navigate = useNavigate();
   const { session, user, profile, organization, loading, refresh } = useAuth();
   const [stepIdx, setStepIdx] = useState(0);
-  const [saving, setSaving] = useState(false);
-
-  // Odoo step state
-  const [odooUrl, setOdooUrl] = useState("");
-  const [odooDb, setOdooDb] = useState("");
-  const [odooUserId, setOdooUserId] = useState("");
-  const [odooApiKey, setOdooApiKey] = useState("");
 
   // Workspace bootstrap state — used when the auth user has no profile/org yet.
   const [companyName, setCompanyName] = useState("");
@@ -113,17 +101,22 @@ export default function OnboardingPage() {
     }
     setBootstrapping(true);
     try {
-      const { data: org, error: orgError } = await supabase
-        .from("organizations")
-        .insert({ name: companyName.trim(), slug: slugify(companyName.trim()) })
-        .select()
-        .single();
+      // Generate the id client-side and skip .select() here: the org's
+      // SELECT policy depends on current_org_id(), which reads users.org_id
+      // — but that row doesn't exist until the upsert below, so reading the
+      // just-inserted org back (RETURNING) would fail RLS.
+      const orgId = crypto.randomUUID();
+      const { error: orgError } = await supabase.from("organizations").insert({
+        id: orgId,
+        name: companyName.trim(),
+        slug: slugify(companyName.trim()),
+      });
       if (orgError) throw orgError;
 
       const { error: profileError } = await supabase.from("users").upsert(
         {
           id: user.id,
-          org_id: org.id,
+          org_id: orgId,
           full_name: fullName.trim(),
           email: user.email,
           role: "owner",
@@ -145,64 +138,25 @@ export default function OnboardingPage() {
   const Icon = step.icon;
   const isFirst = stepIdx === 0;
   const isLast = stepIdx === STEPS.length - 1;
-  const orgId = organization?.id ?? profile?.org_id;
 
   const next = () => setStepIdx((i) => Math.min(STEPS.length - 1, i + 1));
   const back = () => setStepIdx((i) => Math.max(0, i - 1));
   const finish = () => navigate("/dashboard", { replace: true });
 
-  const saveOdoo = async () => {
-    if (!orgId) return;
-    if (!odooUrl && !odooDb && !odooUserId && !odooApiKey) {
-      next();
-      return;
-    }
-    setSaving(true);
-    try {
-      const pairs: Array<[string, string]> = [
-        ["odoo_url", odooUrl],
-        ["odoo_db", odooDb],
-        ["odoo_user_id", odooUserId],
-        ["odoo_api_key", odooApiKey],
-      ];
-      for (const [key, value] of pairs) {
-        if (!value) continue;
-        const { data: existing } = await supabase
-          .from("settings")
-          .select("id")
-          .eq("org_id", orgId)
-          .eq("key", key)
-          .maybeSingle();
-        if (existing) {
-          await supabase
-            .from("settings")
-            .update({ value, updated_at: new Date().toISOString() })
-            .eq("id", existing.id);
-        } else {
-          await supabase.from("settings").insert({ org_id: orgId, key, value });
-        }
-      }
-      toast.success("Odoo settings saved");
-      next();
-    } catch (e: any) {
-      toast.error(e?.message || "Could not save Odoo settings");
-    } finally {
-      setSaving(false);
-    }
-  };
-
   if (needsWorkspace) {
     return (
-      <div className="flex min-h-screen items-center justify-center bg-gradient-to-br from-indigo-50 via-white to-blue-50 p-4">
-        <div className="w-full max-w-md">
+      <div className="relative flex min-h-screen items-center justify-center overflow-hidden bg-background p-4">
+        <AuthBackdrop />
+        <div className="absolute right-4 top-4 z-10">
+          <ThemeToggle className="border border-border bg-card/60 backdrop-blur" />
+        </div>
+        <div className="relative z-10 w-full max-w-md animate-slide-up">
           <div className="mb-6 text-center">
-            <div className="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-xl bg-primary">
-              <Rocket className="h-6 w-6 text-white" />
-            </div>
-            <h1 className="text-2xl font-bold">Welcome to Campaign Commander</h1>
+            <LogoMark />
+            <h1 className="text-xl font-semibold tracking-tight">Welcome to Campaign Commander</h1>
             <p className="mt-1 text-sm text-muted-foreground">Let's set up your workspace.</p>
           </div>
-          <div className="rounded-xl border border-border bg-card p-6 shadow-sm">
+          <div className="rounded-2xl border border-border bg-card/80 p-7 shadow-premium-lg backdrop-blur-sm">
             <div className="mb-5 flex items-start gap-3">
               <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-primary/10">
                 <Building2 className="h-5 w-5 text-primary" />
@@ -248,13 +202,16 @@ export default function OnboardingPage() {
   }
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-gradient-to-br from-indigo-50 via-white to-blue-50 p-4">
-      <div className="w-full max-w-2xl">
+    <div className="relative flex min-h-screen items-center justify-center overflow-hidden bg-background p-4">
+      <AuthBackdrop />
+      <div className="absolute right-4 top-4 z-10">
+        <ThemeToggle className="border border-border bg-card/60 backdrop-blur" />
+      </div>
+
+      <div className="relative z-10 w-full max-w-2xl animate-slide-up">
         <div className="mb-6 text-center">
-          <div className="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-xl bg-primary">
-            <Rocket className="h-6 w-6 text-white" />
-          </div>
-          <h1 className="text-2xl font-bold">Welcome to Campaign Commander</h1>
+          <LogoMark />
+          <h1 className="text-xl font-semibold tracking-tight">Welcome to Campaign Commander</h1>
           <p className="mt-1 text-sm text-muted-foreground">
             A few quick steps and you're ready to launch your first campaign.
           </p>
@@ -267,9 +224,9 @@ export default function OnboardingPage() {
                 className={cn(
                   "flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-xs font-medium",
                   i < stepIdx
-                    ? "bg-primary text-white"
+                    ? "bg-primary text-primary-foreground"
                     : i === stepIdx
-                      ? "bg-primary text-white ring-4 ring-primary/20"
+                      ? "bg-primary text-primary-foreground ring-4 ring-primary/20"
                       : "bg-muted text-muted-foreground",
                 )}
               >
@@ -287,7 +244,7 @@ export default function OnboardingPage() {
           ))}
         </div>
 
-        <div className="rounded-xl border border-border bg-card p-8 shadow-sm">
+        <div className="rounded-2xl border border-border bg-card/80 p-8 shadow-premium-lg backdrop-blur-sm">
           <div className="mb-6 flex items-start gap-3">
             <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-primary/10">
               <Icon className="h-5 w-5 text-primary" />
@@ -304,12 +261,11 @@ export default function OnboardingPage() {
                 You'll be sending campaigns from your own assigned address, with leads sourced and
                 verified by Campaign Commander.
               </p>
-              <p>The only optional setup is Odoo — and you can skip it.</p>
             </div>
           )}
 
           {step.key === "managed" && (
-            <div className="space-y-3 rounded-lg border border-emerald-200 bg-emerald-50/60 p-4 text-sm">
+            <div className="space-y-3 rounded-lg border border-emerald-500/20 bg-emerald-500/10 p-4 text-sm">
               <div className="flex items-start gap-2">
                 <CheckPill /> Lead search & enrichment included
               </div>
@@ -319,86 +275,27 @@ export default function OnboardingPage() {
               <div className="flex items-start gap-2">
                 <CheckPill /> Managed sending domain — no DNS to configure
               </div>
-              <p className="pt-2 text-xs text-emerald-800">
+              <p className="pt-2 text-xs text-emerald-700 dark:text-emerald-400">
                 API services are handled by Campaign Commander ✓
               </p>
             </div>
           )}
 
-          {step.key === "odoo" && (
-            <div className="space-y-3">
-              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                <div className="space-y-1.5">
-                  <Label htmlFor="onb-odoo-url">Odoo URL</Label>
-                  <Input
-                    id="onb-odoo-url"
-                    placeholder="https://yourcompany.odoo.com"
-                    value={odooUrl}
-                    onChange={(e) => setOdooUrl(e.target.value)}
-                  />
-                </div>
-                <div className="space-y-1.5">
-                  <Label htmlFor="onb-odoo-db">Database</Label>
-                  <Input
-                    id="onb-odoo-db"
-                    placeholder="yourcompany"
-                    value={odooDb}
-                    onChange={(e) => setOdooDb(e.target.value)}
-                  />
-                </div>
-                <div className="space-y-1.5">
-                  <Label htmlFor="onb-odoo-user">User ID</Label>
-                  <Input
-                    id="onb-odoo-user"
-                    type="number"
-                    placeholder="2"
-                    value={odooUserId}
-                    onChange={(e) => setOdooUserId(e.target.value)}
-                  />
-                </div>
-                <div className="space-y-1.5">
-                  <Label htmlFor="onb-odoo-key">API Key</Label>
-                  <Input
-                    id="onb-odoo-key"
-                    type="password"
-                    placeholder="Odoo API key"
-                    value={odooApiKey}
-                    onChange={(e) => setOdooApiKey(e.target.value)}
-                  />
-                </div>
-              </div>
-              <p className="text-xs text-muted-foreground">
-                Skip if you don't use Odoo — you can connect it later from Settings.
-              </p>
-            </div>
-          )}
-
           {step.key === "done" && (
-            <div className="rounded-lg bg-emerald-50 p-4 text-sm text-emerald-900">
+            <div className="rounded-lg bg-emerald-500/10 p-4 text-sm text-emerald-700 dark:text-emerald-400">
               You're ready. Head to the dashboard and create your first campaign.
             </div>
           )}
 
           <div className="mt-8 flex items-center justify-between">
-            <Button variant="ghost" onClick={back} disabled={isFirst || saving}>
+            <Button variant="ghost" onClick={back} disabled={isFirst}>
               <ArrowLeft className="h-4 w-4" /> Back
             </Button>
 
             <div className="flex items-center gap-2">
-              {step.optional && (
-                <Button variant="outline" onClick={next} disabled={saving}>
-                  <SkipForward className="h-4 w-4" /> Skip
-                </Button>
-              )}
               {isLast ? (
                 <Button onClick={finish}>
                   Go to dashboard
-                  <ArrowRight className="h-4 w-4" />
-                </Button>
-              ) : step.key === "odoo" ? (
-                <Button onClick={saveOdoo} disabled={saving}>
-                  {saving && <Spinner />}
-                  Save & continue
                   <ArrowRight className="h-4 w-4" />
                 </Button>
               ) : (

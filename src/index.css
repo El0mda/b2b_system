@@ -3,6 +3,51 @@
 @tailwind utilities;
 
 @layer base {
+  :root {
+    color-scheme: light;
+    --background: 0 0% 100%;
+    --foreground: 225 48% 17%;
+    --card: 0 0% 100%;
+    --card-foreground: 225 48% 17%;
+    --border: 220 26% 91%;
+    --input: 220 26% 91%;
+    --ring: 190 85% 31%;
+    --primary: 190 85% 31%;
+    --primary-foreground: 0 0% 100%;
+    --secondary: 218 31% 95%;
+    --secondary-foreground: 225 48% 17%;
+    --muted: 223 33% 96%;
+    --muted-foreground: 221 16% 47%;
+    --accent: 192 75% 94%;
+    --accent-foreground: 190 85% 27%;
+    --destructive: 0 72% 51%;
+    --destructive-foreground: 0 0% 100%;
+
+    --brand-navy: 229 48% 20%;
+    --brand-cyan: 191 65% 64%;
+  }
+
+  .dark {
+    color-scheme: dark;
+    --background: 229 51% 8%;
+    --foreground: 216 42% 95%;
+    --card: 227 47% 12%;
+    --card-foreground: 216 42% 95%;
+    --border: 227 37% 22%;
+    --input: 227 37% 22%;
+    --ring: 191 65% 64%;
+    --primary: 191 65% 64%;
+    --primary-foreground: 229 51% 8%;
+    --secondary: 228 44% 15%;
+    --secondary-foreground: 216 42% 95%;
+    --muted: 228 44% 15%;
+    --muted-foreground: 225 18% 60%;
+    --accent: 210 45% 16%;
+    --accent-foreground: 191 65% 74%;
+    --destructive: 0 84% 60%;
+    --destructive-foreground: 229 51% 8%;
+  }
+
   * {
     @apply border-border;
   }
@@ -14,5 +59,35 @@
   body {
     @apply bg-background text-foreground font-sans antialiased;
     font-feature-settings: "cv02", "cv03", "cv04", "cv11";
+    transition:
+      background-color 0.2s ease,
+      color 0.2s ease;
+  }
+
+  ::selection {
+    background-color: hsl(var(--primary) / 0.25);
+  }
+
+  ::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  ::-webkit-scrollbar-thumb {
+    background-color: hsl(var(--muted-foreground) / 0.25);
+    border-radius: 9999px;
+    border: 2px solid hsl(var(--background));
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background-color: hsl(var(--muted-foreground) / 0.4);
+  }
+}
+
+@layer utilities {
+  .bg-grid {
+    background-image: radial-gradient(hsl(var(--foreground) / 0.08) 1px, transparent 1px);
+    background-size: 20px 20px;
   }
 }

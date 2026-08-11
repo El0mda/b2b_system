@@ -38,15 +38,19 @@ interface SequenceRow {
 
 const SMARTLEAD_API = "https://server.smartlead.ai/api/v1";
 
-// Convert app template vars {{first_name}} -> {{firstName}} for SmartLead
+// Map app template vars to SmartLead's merge tags, which mirror the lead
+// field names sent in Step C below (first_name, last_name, company_name,
+// location) — SmartLead's tags are snake_case, not camelCase. Getting this
+// wrong doesn't error; SmartLead just silently substitutes an empty string,
+// so a mismatch here is invisible until you read a sent email.
 function toSmartleadVars(template: string): string {
   const map: Record<string, string> = {
-    first_name: "firstName",
-    last_name: "lastName",
-    full_name: "fullName",
-    company: "companyName",
-    job_title: "title",
-    title: "title",
+    first_name: "first_name",
+    last_name: "last_name",
+    full_name: "first_name",
+    company: "company_name",
+    job_title: "job_title",
+    title: "job_title",
     location: "location",
     email: "email",
   };
@@ -241,12 +245,12 @@ Deno.serve(async (req) => {
     let emailAccountId: number | null = null;
     if (accountsRes.ok) {
       const accounts = await accountsRes.json();
-      // Find the account matching b2b@etriplesoft.com
+      // Find the account matching leads@etriplesoft.com
       const target = Array.isArray(accounts)
         ? accounts.find(
             (a: any) =>
-              a.from_email === "b2b@etriplesoft.com" ||
-              a.email === "b2b@etriplesoft.com",
+              a.from_email === "leads@etriplesoft.com" ||
+              a.email === "leads@etriplesoft.com",
           )
         : null;
       if (target) {
@@ -271,7 +275,7 @@ Deno.serve(async (req) => {
       }
     } else {
       console.warn(
-        "Could not find email account for b2b@etriplesoft.com — campaign may have no sender",
+        "Could not find email account for leads@etriplesoft.com — campaign may have no sender",
       );
     }
 
@@ -333,10 +337,38 @@ Deno.serve(async (req) => {
     const startTxt = await startRes.text();
     console.log("SmartLead start response:", startRes.status, startTxt);
 
+    // ── Step H: Register delivery/open/click/reply webhook ──
+    // Non-fatal — the campaign still sends without it, it just means the
+    // local dashboard won't reflect delivery status until it's added.
+    try {
+      const webhookRes = await smartleadFetch("/webhook/create", smartleadKey, {
+        method: "POST",
+        body: JSON.stringify({
+          name: "Campaign Commander sync",
+          webhook_url: `${supabaseUrl}/functions/v1/smartlead-webhooks`,
+          email_campaign_id: slCampaignId,
+          association_type: 3,
+          event_type_map: {
+            EMAIL_SENT: true,
+            EMAIL_OPENED: true,
+            EMAIL_CLICKED: true,
+            EMAIL_REPLIED: true,
+            EMAIL_BOUNCED: true,
+            EMAIL_UNSUBSCRIBED: true,
+          },
+        }),
+      });
+      if (!webhookRes.ok) {
+        console.error("SmartLead webhook registration failed:", await webhookRes.text());
+      }
+    } catch (e) {
+      console.error("SmartLead webhook registration error:", e);
+    }
+
     // ── Update local DB ──
     const { error: updateCampaignErr } = await userClient
       .from("campaigns")
-      .update({ status: "active" } as any)
+      .update({ status: "active", smartlead_campaign_id: String(slCampaignId) } as any)
       .eq("id", campaign_id);
     if (updateCampaignErr) {
       console.error("Failed to update campaign status:", updateCampaignErr);
@@ -355,7 +387,7 @@ Deno.serve(async (req) => {
       smartlead_campaign_id: slCampaignId,
       leads_added: (leads as Lead[]).length,
       sequence_steps: (sequences as SequenceRow[]).length,
-      sender_email: "b2b@etriplesoft.com",
+      sender_email: "leads@etriplesoft.com",
       email_account_id: emailAccountId,
       scheduled: true,
       start_response: startTxt,

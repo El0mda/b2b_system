@@ -284,7 +284,7 @@ export default function AnalyticsPage() {
                 <div className="flex-1">
                   <div className="flex h-7 items-center rounded-md bg-muted">
                     <div
-                      className="flex h-full items-center justify-end rounded-md bg-gradient-to-r from-indigo-500 to-indigo-600 px-2 text-xs font-medium text-white transition-all"
+                      className="flex h-full items-center justify-end rounded-md bg-primary px-2 text-xs font-medium text-primary-foreground transition-all"
                       style={{ width: `${f.pct}%` }}
                     >
                       {f.pct >= 15 ? `${f.pct}%` : ""}

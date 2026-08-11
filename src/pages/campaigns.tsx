@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { Link } from "react-router-dom";
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Rocket,
   Plus,
@@ -9,8 +9,13 @@ import {
   CheckCircle2,
   Eye,
   MessageSquare,
+  MoreHorizontal,
+  FileEdit,
+  PlayCircle,
+  Trash2,
 } from "lucide-react";
 import { format } from "date-fns";
+import { toast } from "sonner";
 
 import { supabase } from "@/lib/supabase";
 import { useAuth } from "@/hooks/use-auth";
@@ -27,24 +32,32 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { FullPageSpinner } from "@/components/ui/spinner";
+import { FullPageSpinner, Spinner } from "@/components/ui/spinner";
+import { DropdownMenu, DropdownItem } from "@/components/ui/dropdown-menu";
+import {
+  Dialog,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+  DialogFooter,
+} from "@/components/ui/dialog";
 import { cn } from "@/lib/utils";
 
 const STATUS_OPTIONS = ["all", "draft", "searching", "enriching", "active", "paused", "completed"];
 
 const STATUS_BADGE: Record<string, { className: string; pulse?: boolean }> = {
   draft: { className: "bg-muted text-muted-foreground" },
-  searching: { className: "bg-blue-100 text-blue-700", pulse: true },
-  enriching: { className: "bg-purple-100 text-purple-700", pulse: true },
-  active: { className: "bg-emerald-100 text-emerald-700" },
-  paused: { className: "bg-amber-100 text-amber-700" },
-  completed: { className: "bg-gray-200 text-gray-700" },
+  searching: { className: "bg-blue-500/15 text-blue-600 dark:text-blue-400", pulse: true },
+  enriching: { className: "bg-purple-500/15 text-purple-600 dark:text-purple-400", pulse: true },
+  active: { className: "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400" },
+  paused: { className: "bg-amber-500/15 text-amber-600 dark:text-amber-400" },
+  completed: { className: "bg-muted text-muted-foreground" },
 };
 
 const SOURCE_BADGE: Record<string, string> = {
-  lusha: "bg-blue-100 text-blue-700",
-  import: "bg-purple-100 text-purple-700",
-  mixed: "bg-gray-100 text-gray-700",
+  lusha: "bg-blue-500/15 text-blue-600 dark:text-blue-400",
+  import: "bg-purple-500/15 text-purple-600 dark:text-purple-400",
+  mixed: "bg-muted text-muted-foreground",
 };
 
 interface CampaignRow {
@@ -62,8 +75,10 @@ interface CampaignRow {
 export default function CampaignsPage() {
   const { organization } = useAuth();
   const orgId = organization?.id;
+  const qc = useQueryClient();
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
+  const [pendingDelete, setPendingDelete] = useState<CampaignRow | null>(null);
 
   const { data: campaigns = [], isLoading } = useQuery<CampaignRow[]>({
     queryKey: ["campaigns", orgId],
@@ -101,6 +116,39 @@ export default function CampaignsPage() {
         replied: statsMap.get(c.id)?.replied ?? 0,
       }));
     },
+  });
+
+  const setStatus = useMutation({
+    mutationFn: async ({ id, status }: { id: string; status: string }) => {
+      const { data, error } = await supabase.functions.invoke("campaign-action", {
+        body: { campaign_id: id, action: status },
+      });
+      if (error) throw error;
+      if (data?.error) throw new Error(data.error);
+    },
+    onSuccess: (_data, { status }) => {
+      qc.invalidateQueries({ queryKey: ["campaigns", orgId] });
+      toast.success(
+        status === "active" ? "Campaign activated" : "Campaign set to draft — paused in SmartLead",
+      );
+    },
+    onError: (e: any) => toast.error(e?.message || "Could not update campaign"),
+  });
+
+  const deleteCampaign = useMutation({
+    mutationFn: async (id: string) => {
+      const { data, error } = await supabase.functions.invoke("campaign-action", {
+        body: { campaign_id: id, action: "delete" },
+      });
+      if (error) throw error;
+      if (data?.error) throw new Error(data.error);
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["campaigns", orgId] });
+      toast.success("Campaign deleted");
+      setPendingDelete(null);
+    },
+    onError: (e: any) => toast.error(e?.message || "Could not delete campaign"),
   });
 
   if (isLoading) return <FullPageSpinner />;
@@ -241,9 +289,55 @@ export default function CampaignsPage() {
                         {c.created_at ? format(new Date(c.created_at), "MMM d, yyyy") : "—"}
                       </TableCell>
                       <TableCell className="text-right">
-                        <Button asChild variant="ghost" size="sm">
-                          <Link to={`/campaigns/${c.id}`}>View</Link>
-                        </Button>
+                        <div className="flex items-center justify-end gap-1">
+                          <Button asChild variant="ghost" size="sm">
+                            <Link to={`/campaigns/${c.id}`}>View</Link>
+                          </Button>
+                          <DropdownMenu
+                            trigger={
+                              <Button variant="ghost" size="icon" aria-label="Campaign actions">
+                                <MoreHorizontal className="h-4 w-4" />
+                              </Button>
+                            }
+                          >
+                            {(close) => (
+                              <>
+                                {c.status !== "draft" && (
+                                  <DropdownItem
+                                    icon={<FileEdit className="h-4 w-4" />}
+                                    onSelect={() => {
+                                      close();
+                                      setStatus.mutate({ id: c.id, status: "draft" });
+                                    }}
+                                  >
+                                    Set to draft
+                                  </DropdownItem>
+                                )}
+                                {c.status !== "active" && (
+                                  <DropdownItem
+                                    icon={<PlayCircle className="h-4 w-4" />}
+                                    onSelect={() => {
+                                      close();
+                                      setStatus.mutate({ id: c.id, status: "active" });
+                                    }}
+                                  >
+                                    Activate
+                                  </DropdownItem>
+                                )}
+                                <DropdownItem
+                                  destructive
+                                  icon={<Trash2 className="h-4 w-4" />}
+                                  onSelect={() => {
+                                    close();
+                                    setPendingDelete(c);
+                                  }}
+                                >
+                                  Delete
+                                </DropdownItem>
+                              </>
+                            )}
+                          </DropdownMenu>
+                        </div>
                       </TableCell>
                     </TableRow>
                   );
@@ -253,6 +347,29 @@ export default function CampaignsPage() {
           )}
         </CardContent>
       </Card>
+
+      <Dialog open={!!pendingDelete} onClose={() => setPendingDelete(null)}>
+        <DialogHeader>
+          <DialogTitle>Delete campaign?</DialogTitle>
+          <DialogDescription>
+            This permanently deletes "{pendingDelete?.name}" and all its leads, sequences, and
+            activity. This can't be undone.
+          </DialogDescription>
+        </DialogHeader>
+        <DialogFooter>
+          <Button variant="outline" onClick={() => setPendingDelete(null)}>
+            Cancel
+          </Button>
+          <Button
+            variant="destructive"
+            disabled={deleteCampaign.isPending}
+            onClick={() => pendingDelete && deleteCampaign.mutate(pendingDelete.id)}
+          >
+            {deleteCampaign.isPending && <Spinner />}
+            Delete campaign
+          </Button>
+        </DialogFooter>
+      </Dialog>
     </div>
   );
 }

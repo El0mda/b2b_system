@@ -56,40 +56,6 @@ export async function testResendKey(key: string): Promise<TestResult> {
   return { ok: false, message: `Resend responded ${res!.status}` };
 }
 
-export interface OdooConfig {
-  url: string;
-  db: string;
-  userId: number;
-  apiKey: string;
-}
-
-export async function testOdooConnection(cfg: OdooConfig): Promise<TestResult> {
-  if (!cfg.url || !cfg.db || !cfg.userId || !cfg.apiKey) {
-    return { ok: false, message: "All Odoo fields are required" };
-  }
-  const url = cfg.url.replace(/\/$/, "") + "/jsonrpc";
-  const body = {
-    jsonrpc: "2.0",
-    method: "call",
-    params: {
-      service: "common",
-      method: "authenticate",
-      args: [cfg.db, cfg.userId, cfg.apiKey, {}],
-    },
-  };
-  const { res, error } = await safeFetch(url, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body),
-  });
-  if (error) return { ok: false, message: error };
-  if (!res!.ok) return { ok: false, message: `Odoo responded ${res!.status}` };
-  const json: any = await res!.json().catch(() => ({}));
-  if (json?.error) return { ok: false, message: json.error?.data?.message || "Odoo error" };
-  if (json?.result) return { ok: true, message: "Odoo connection OK" };
-  return { ok: false, message: "Odoo authentication failed — check user ID and key" };
-}
-
 export interface ResendDnsRecord {
   record: string;
   name: string;

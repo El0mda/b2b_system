@@ -105,9 +105,9 @@ export function StepLaunch({
           name: state.campaignName.trim(),
           status: "active",
           source: state.sourceTab === "lusha" ? "lusha" : "import",
-          sender_email: "b2b@etriplesoft.com",
-          sender_name: "b2b",
-          reply_to_email: state.reply_to_email || "b2b@etriplesoft.com",
+          sender_email: "leads@etriplesoft.com",
+          sender_name: "Etriplesoft",
+          reply_to_email: state.reply_to_email || "leads@etriplesoft.com",
           timezone: state.timezone,
           leads_added: selectedLeads.length,
           leads_searched: leadsSearched,
@@ -219,7 +219,7 @@ export function StepLaunch({
           <SummaryRow label="Campaign name" value={state.campaignName} />
           <SummaryRow
             label="Sender"
-            value="b2b@etriplesoft.com (SmartLead SMTP)"
+            value="leads@etriplesoft.com (SmartLead SMTP)"
           />
           <SummaryRow label="Timezone" value={state.timezone} />
           <SummaryRow label="Leads" value={String(selectedLeads.length)} />
@@ -295,12 +295,12 @@ export function StepLaunch({
         </div>
       </Collapsible>
 
-      <div className="rounded-md border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800">
+      <div className="rounded-md border border-amber-500/20 bg-amber-500/10 p-4 text-sm text-amber-800 dark:text-amber-400">
         <div className="flex items-start gap-2">
           <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
           <div>
             This will send emails to <strong>{selectedLeads.length}</strong> contacts from{" "}
-            <strong>b2b@etriplesoft.com</strong>. Step 1 sends immediately;
+            <strong>leads@etriplesoft.com</strong>. Step 1 sends immediately;
             steps 2+ are scheduled.
           </div>
         </div>
@@ -352,7 +352,7 @@ export function StepLaunch({
               done={phase === "complete"}
             />
             {phase === "complete" && (
-              <div className="mt-2 flex items-center gap-2 rounded-md bg-emerald-50 p-3 text-sm font-medium text-emerald-700">
+              <div className="mt-2 flex items-center gap-2 rounded-md bg-emerald-500/10 p-3 text-sm font-medium text-emerald-700 dark:text-emerald-400">
                 <PartyPopper className="h-5 w-5" />
                 <div>
                   Campaign launched on SmartLead!

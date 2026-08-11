@@ -1,7 +1,8 @@
 import { useState } from "react";
 import { Link, useParams, useNavigate } from "react-router-dom";
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { format } from "date-fns";
+import { toast } from "sonner";
 import {
   ArrowLeft,
   Users,
@@ -24,6 +25,10 @@ import {
   X,
   Clock,
   Loader2,
+  MoreHorizontal,
+  FileEdit,
+  PlayCircle,
+  Trash2,
 } from "lucide-react";
 import {
   ResponsiveContainer,
@@ -46,7 +51,15 @@ import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
 import { Checkbox } from "@/components/ui/checkbox";
-import { FullPageSpinner } from "@/components/ui/spinner";
+import { FullPageSpinner, Spinner } from "@/components/ui/spinner";
+import { DropdownMenu, DropdownItem } from "@/components/ui/dropdown-menu";
+import {
+  Dialog,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+  DialogFooter,
+} from "@/components/ui/dialog";
 import { cn } from "@/lib/utils";
 
 type Tab = "overview" | "leads" | "sequences" | "performance" | "activity";
@@ -118,19 +131,23 @@ interface WebhookLog {
 
 const STATUS_STYLES: Record<string, string> = {
   draft: "bg-muted text-muted-foreground",
-  searching: "bg-blue-100 text-blue-700",
-  enriching: "bg-purple-100 text-purple-700",
-  active: "bg-emerald-100 text-emerald-700",
-  paused: "bg-amber-100 text-amber-700",
-  completed: "bg-gray-200 text-gray-700",
+  searching: "bg-blue-500/15 text-blue-600 dark:text-blue-400",
+  enriching: "bg-purple-500/15 text-purple-600 dark:text-purple-400",
+  active: "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400",
+  paused: "bg-amber-500/15 text-amber-600 dark:text-amber-400",
+  completed: "bg-muted text-muted-foreground",
 };
 
 const LEAD_STATUS = (l: Lead): { label: string; className: string } => {
-  if (l.replied_at) return { label: "Replied", className: "bg-purple-100 text-purple-700" };
-  if (l.email_clicked) return { label: "Clicked", className: "bg-blue-100 text-blue-700" };
-  if (l.email_opened) return { label: "Opened", className: "bg-amber-100 text-amber-700" };
+  if (l.replied_at)
+    return { label: "Replied", className: "bg-purple-500/15 text-purple-600 dark:text-purple-400" };
+  if (l.email_clicked)
+    return { label: "Clicked", className: "bg-blue-500/15 text-blue-600 dark:text-blue-400" };
+  if (l.email_opened)
+    return { label: "Opened", className: "bg-amber-500/15 text-amber-600 dark:text-amber-400" };
   if (l.email_bounced) return { label: "Bounced", className: "bg-destructive/10 text-destructive" };
-  if (l.email_delivered) return { label: "Sent", className: "bg-emerald-100 text-emerald-700" };
+  if (l.email_delivered)
+    return { label: "Sent", className: "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400" };
   return { label: "Pending", className: "bg-muted text-muted-foreground" };
 };
 
@@ -141,10 +158,12 @@ export default function CampaignDetailPage() {
   const { organization } = useAuth();
   const orgId = organization?.id;
   const navigate = useNavigate();
+  const qc = useQueryClient();
   const [tab, setTab] = useState<Tab>("overview");
   const [leadFilter, setLeadFilter] = useState<string>("all");
   const [leadSearch, setLeadSearch] = useState("");
   const [selectedLead, setSelectedLead] = useState<Lead | null>(null);
+  const [confirmDelete, setConfirmDelete] = useState(false);
 
   const { data: campaign, isLoading: campLoading } = useQuery<Campaign | null>({
     queryKey: ["campaign", id],
@@ -197,6 +216,42 @@ export default function CampaignDetailPage() {
         .limit(50);
       return (data ?? []) as WebhookLog[];
     },
+  });
+
+  const setStatus = useMutation({
+    mutationFn: async (status: string) => {
+      if (!id) return;
+      const { data, error } = await supabase.functions.invoke("campaign-action", {
+        body: { campaign_id: id, action: status },
+      });
+      if (error) throw error;
+      if (data?.error) throw new Error(data.error);
+    },
+    onSuccess: (_data, status) => {
+      qc.invalidateQueries({ queryKey: ["campaign", id] });
+      qc.invalidateQueries({ queryKey: ["campaigns", orgId] });
+      toast.success(
+        status === "active" ? "Campaign activated" : "Campaign set to draft — paused in SmartLead",
+      );
+    },
+    onError: (e: any) => toast.error(e?.message || "Could not update campaign"),
+  });
+
+  const deleteCampaign = useMutation({
+    mutationFn: async () => {
+      if (!id) return;
+      const { data, error } = await supabase.functions.invoke("campaign-action", {
+        body: { campaign_id: id, action: "delete" },
+      });
+      if (error) throw error;
+      if (data?.error) throw new Error(data.error);
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["campaigns", orgId] });
+      toast.success("Campaign deleted");
+      navigate("/campaigns", { replace: true });
+    },
+    onError: (e: any) => toast.error(e?.message || "Could not delete campaign"),
   });
 
   if (campLoading) return <FullPageSpinner />;
@@ -263,7 +318,76 @@ export default function CampaignDetailPage() {
             <p className="text-sm text-muted-foreground">Created {createdDate}</p>
           </div>
         </div>
+
+        <DropdownMenu
+          trigger={
+            <Button variant="outline" size="sm">
+              <MoreHorizontal className="h-4 w-4" />
+              Manage
+            </Button>
+          }
+        >
+          {(close) => (
+            <>
+              {campaign.status !== "draft" && (
+                <DropdownItem
+                  icon={<FileEdit className="h-4 w-4" />}
+                  onSelect={() => {
+                    close();
+                    setStatus.mutate("draft");
+                  }}
+                >
+                  Set to draft
+                </DropdownItem>
+              )}
+              {campaign.status !== "active" && (
+                <DropdownItem
+                  icon={<PlayCircle className="h-4 w-4" />}
+                  onSelect={() => {
+                    close();
+                    setStatus.mutate("active");
+                  }}
+                >
+                  Activate
+                </DropdownItem>
+              )}
+              <DropdownItem
+                destructive
+                icon={<Trash2 className="h-4 w-4" />}
+                onSelect={() => {
+                  close();
+                  setConfirmDelete(true);
+                }}
+              >
+                Delete
+              </DropdownItem>
+            </>
+          )}
+        </DropdownMenu>
       </div>
+
+      <Dialog open={confirmDelete} onClose={() => setConfirmDelete(false)}>
+        <DialogHeader>
+          <DialogTitle>Delete campaign?</DialogTitle>
+          <DialogDescription>
+            This permanently deletes "{campaign.name}" and all its leads, sequences, and activity.
+            This can't be undone.
+          </DialogDescription>
+        </DialogHeader>
+        <DialogFooter>
+          <Button variant="outline" onClick={() => setConfirmDelete(false)}>
+            Cancel
+          </Button>
+          <Button
+            variant="destructive"
+            disabled={deleteCampaign.isPending}
+            onClick={() => deleteCampaign.mutate()}
+          >
+            {deleteCampaign.isPending && <Spinner />}
+            Delete campaign
+          </Button>
+        </DialogFooter>
+      </Dialog>
 
       {/* Tabs */}
       <div className="flex gap-1 border-b border-border">
@@ -499,7 +623,7 @@ function TabLeads({
                       <Td className="text-muted-foreground">{l.company ?? "—"}</Td>
                       <Td className="text-muted-foreground">{l.job_title ?? "—"}</Td>
                       <Td>
-                        <Badge className={l.source === "lusha" ? "bg-blue-100 text-blue-700" : "bg-purple-100 text-purple-700"}>
+                        <Badge className={l.source === "lusha" ? "bg-blue-500/15 text-blue-600 dark:text-blue-400" : "bg-purple-500/15 text-purple-600 dark:text-purple-400"}>
                           {l.source === "lusha" ? "Lusha" : "Import"}
                         </Badge>
                       </Td>
@@ -561,7 +685,7 @@ function LeadSlideOver({ lead, onClose }: { lead: Lead; onClose: () => void }) {
   return (
     <div className="fixed inset-0 z-50 flex justify-end">
       <div className="absolute inset-0 bg-black/30" onClick={onClose} />
-      <div className="relative flex h-full w-full max-w-lg flex-col bg-white shadow-xl">
+      <div className="relative flex h-full w-full max-w-lg flex-col bg-card shadow-2xl">
         <div className="flex items-center justify-between border-b border-border px-6 py-4">
           <div>
             <h3 className="text-lg font-semibold">
@@ -601,7 +725,7 @@ function LeadSlideOver({ lead, onClose }: { lead: Lead; onClose: () => void }) {
                     {i < timeline.length - 1 && (
                       <div className="absolute left-2.5 top-4 h-full w-px bg-border" />
                     )}
-                    <div className="absolute left-0 top-0.5 flex h-5 w-5 items-center justify-center rounded-full border-2 border-border bg-white">
+                    <div className="absolute left-0 top-0.5 flex h-5 w-5 items-center justify-center rounded-full border-2 border-border bg-card">
                       <t.icon className="h-2.5 w-2.5 text-muted-foreground" />
                     </div>
                     <div className="flex-1">
@@ -632,7 +756,7 @@ function LeadSlideOver({ lead, onClose }: { lead: Lead; onClose: () => void }) {
           <div className="space-y-2">
             <h4 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Odoo CRM</h4>
             {lead.synced_to_odoo ? (
-              <div className="flex items-center gap-2 rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-700">
+              <div className="flex items-center gap-2 rounded-lg border border-emerald-500/20 bg-emerald-500/10 p-3 text-sm text-emerald-700 dark:text-emerald-400">
                 <CheckCircle2 className="h-4 w-4" />
                 Synced to Odoo{lead.odoo_lead_id ? ` (Lead ID: ${lead.odoo_lead_id})` : ""}
               </div>
@@ -896,7 +1020,7 @@ function TabActivity({
                 {i < events.length - 1 && (
                   <div className="absolute left-3.5 top-5 h-full w-px bg-border" />
                 )}
-                <div className="absolute left-0 top-0.5 flex h-7 w-7 items-center justify-center rounded-full border-2 border-border bg-white">
+                <div className="absolute left-0 top-0.5 flex h-7 w-7 items-center justify-center rounded-full border-2 border-border bg-card">
                   <e.icon className="h-3.5 w-3.5 text-muted-foreground" />
                 </div>
                 <div className="flex-1">

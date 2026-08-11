@@ -48,8 +48,8 @@ export function StepConfigure({
             </Select>
           </div>
 
-          <div className="rounded-md border border-blue-200 bg-blue-50 p-3 text-sm text-blue-700">
-            All emails will be sent from <span className="font-mono font-medium">b2b@etriplesoft.com</span> via SmartLead SMTP.
+          <div className="rounded-md border border-blue-500/20 bg-blue-500/10 p-3 text-sm text-blue-700 dark:text-blue-400">
+            All emails will be sent from <span className="font-mono font-medium">leads@etriplesoft.com</span> via SmartLead SMTP.
           </div>
         </CardContent>
       </Card>

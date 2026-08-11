@@ -1,69 +1,19 @@
-import { useState, type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { Link, NavLink, useLocation, useNavigate } from "react-router-dom";
-import {
-  LayoutDashboard,
-  Rocket,
-  Users,
-  Upload,
-  BarChart3,
-  Settings,
-  UsersRound,
-  Search,
-  Bell,
-  Menu,
-  X,
-  LogOut,
-  ChevronDown,
-} from "lucide-react";
+import { Search, Bell, Menu, X, LogOut, Settings, UsersRound } from "lucide-react";
 
 import { useAuth } from "@/hooks/use-auth";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
+import { NAV } from "@/components/layout/nav-items";
+import { ThemeToggle } from "@/components/layout/theme-toggle";
+import { CommandPalette } from "@/components/layout/command-palette";
+import { DropdownMenu, DropdownItem } from "@/components/ui/dropdown-menu";
 import { cn } from "@/lib/utils";
-
-interface NavChild {
-  label: string;
-  to: string;
-}
-interface NavItem {
-  label: string;
-  to: string;
-  icon: typeof LayoutDashboard;
-  children?: NavChild[];
-}
-
-const NAV: NavItem[] = [
-  { label: "Dashboard", to: "/dashboard", icon: LayoutDashboard },
-  {
-    label: "Campaigns",
-    to: "/campaigns",
-    icon: Rocket,
-    children: [
-      { label: "All Campaigns", to: "/campaigns" },
-      { label: "New Campaign", to: "/campaigns/new" },
-    ],
-  },
-  { label: "Leads", to: "/leads", icon: Users },
-  { label: "Import Leads", to: "/import", icon: Upload },
-  { label: "Analytics", to: "/analytics", icon: BarChart3 },
-  { label: "Settings", to: "/settings", icon: Settings },
-  { label: "Team", to: "/team", icon: UsersRound },
-];
-
-const PAGE_TITLES: Record<string, string> = {
-  "/dashboard": "Dashboard",
-  "/campaigns": "Campaigns",
-  "/campaigns/new": "New Campaign",
-  "/leads": "Leads",
-  "/import": "Import Leads",
-  "/analytics": "Analytics",
-  "/settings": "Settings",
-  "/team": "Team",
-};
+import logo from "@/assets/company_logo.png";
+import logoDark from "@/assets/company_logo_dark.png";
 
 export function AppShell({ children }: { children: ReactNode }) {
   const [mobileOpen, setMobileOpen] = useState(false);
-  const [userMenuOpen, setUserMenuOpen] = useState(false);
+  const [paletteOpen, setPaletteOpen] = useState(false);
   const location = useLocation();
   const navigate = useNavigate();
   const { profile, organization, signOut } = useAuth();
@@ -75,161 +25,180 @@ export function AppShell({ children }: { children: ReactNode }) {
     .join("")
     .toUpperCase();
 
-  const title =
-    PAGE_TITLES[location.pathname] ||
-    (location.pathname.startsWith("/campaigns/") ? "Campaign" : "Campaign Commander");
+  useEffect(() => setMobileOpen(false), [location.pathname]);
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") {
+        e.preventDefault();
+        setPaletteOpen(true);
+      }
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, []);
 
   const handleSignOut = async () => {
     await signOut();
     navigate("/login");
   };
 
-  const Sidebar = (
-    <aside className="flex h-screen w-64 flex-col border-r border-sidebar-border bg-sidebar text-sidebar-foreground">
-      <div className="flex items-center gap-2 border-b border-sidebar-border px-5 py-5">
-        <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-primary">
-          <Rocket className="h-4 w-4 text-white" />
-        </div>
-        <div className="leading-tight">
-          <div className="text-sm font-semibold text-white">Campaign</div>
-          <div className="text-sm font-semibold text-white">Commander</div>
-        </div>
-      </div>
-
-      <nav className="flex-1 space-y-1 overflow-y-auto px-3 py-4">
-        {NAV.map((item) => {
-          const Icon = item.icon;
-          const active =
-            location.pathname === item.to ||
-            (item.to !== "/dashboard" && location.pathname.startsWith(item.to));
-          return (
-            <div key={item.to}>
-              <NavLink
-                to={item.to}
-                onClick={() => setMobileOpen(false)}
-                className={cn(
-                  "flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors",
-                  active
-                    ? "bg-primary text-white"
-                    : "text-sidebar-foreground hover:bg-sidebar-accent hover:text-white",
-                )}
-              >
-                <Icon className="h-4 w-4" />
-                {item.label}
-              </NavLink>
-              {item.children && active && (
-                <div className="ml-8 mt-1 space-y-1">
-                  {item.children.map((c) => (
-                    <NavLink
-                      key={c.to}
-                      to={c.to}
-                      onClick={() => setMobileOpen(false)}
-                      end
-                      className={({ isActive }) =>
-                        cn(
-                          "block rounded px-3 py-1.5 text-xs transition-colors",
-                          isActive
-                            ? "text-white"
-                            : "text-sidebar-foreground/70 hover:text-white",
-                        )
-                      }
-                    >
-                      → {c.label}
-                    </NavLink>
-                  ))}
-                </div>
-              )}
-            </div>
-          );
-        })}
-      </nav>
-
-      <div className="relative border-t border-sidebar-border">
-        <button
-          onClick={() => setUserMenuOpen((o) => !o)}
-          className="flex w-full items-center gap-3 px-4 py-3 text-left transition-colors hover:bg-sidebar-accent"
-        >
-          <div className="flex h-9 w-9 items-center justify-center rounded-full bg-primary text-xs font-medium text-white">
-            {initials}
-          </div>
-          <div className="min-w-0 flex-1">
-            <div className="truncate text-xs font-medium text-white">
-              {organization?.name ?? "Workspace"}
-            </div>
-            <div className="truncate text-[11px] text-sidebar-foreground/70">
-              {profile?.full_name ?? profile?.email ?? ""}
-            </div>
-          </div>
-          <ChevronDown className="h-4 w-4 text-sidebar-foreground/70" />
-        </button>
-        {userMenuOpen && (
-          <div className="absolute bottom-full left-3 right-3 mb-2 overflow-hidden rounded-md border border-border bg-white shadow-lg">
-            <button
-              onClick={() => {
-                setUserMenuOpen(false);
-                navigate("/settings");
-              }}
-              className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-foreground hover:bg-muted"
-            >
-              <Settings className="h-4 w-4" /> Settings
-            </button>
-            <button
-              onClick={handleSignOut}
-              className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-foreground hover:bg-muted"
-            >
-              <LogOut className="h-4 w-4" /> Sign out
-            </button>
-          </div>
-        )}
-      </div>
-    </aside>
-  );
+  const isActive = (to: string) =>
+    location.pathname === to || (to !== "/dashboard" && location.pathname.startsWith(to));
 
   return (
-    <div className="flex min-h-screen bg-background">
-      <div className="hidden lg:block">{Sidebar}</div>
+    <div className="flex min-h-screen flex-col bg-background">
+      <header className="sticky top-0 z-40 border-b border-border/80 bg-background/85 backdrop-blur-md">
+        <div className="mx-auto flex h-16 max-w-[100rem] items-center gap-2 px-4 lg:px-8">
+          <Link to="/dashboard" className="flex shrink-0 items-center gap-2.5">
+            <img src={logo} alt="etriplesoft" className="h-8 w-auto dark:hidden" />
+            <img src={logoDark} alt="etriplesoft" className="hidden h-8 w-auto dark:block" />
+          </Link>
 
-      {mobileOpen && (
-        <div className="fixed inset-0 z-40 lg:hidden">
-          <div className="absolute inset-0 bg-black/50" onClick={() => setMobileOpen(false)} />
-          <div className="absolute left-0 top-0">{Sidebar}</div>
-        </div>
-      )}
+          <nav className="ml-4 hidden items-center gap-1 rounded-full border border-border/70 bg-muted/50 p-1 lg:flex">
+            {NAV.map((item) => {
+              const active = isActive(item.to);
+              const Icon = item.icon;
+              return (
+                <NavLink
+                  key={item.to}
+                  to={item.to}
+                  className={cn(
+                    "flex items-center gap-1.5 rounded-full px-3.5 py-1.5 text-sm font-medium transition-all",
+                    active
+                      ? "bg-primary text-primary-foreground shadow-sm"
+                      : "text-muted-foreground hover:text-foreground",
+                  )}
+                >
+                  <Icon className="h-3.5 w-3.5" />
+                  {item.label}
+                </NavLink>
+              );
+            })}
+          </nav>
 
-      <div className="flex min-w-0 flex-1 flex-col">
-        <header className="sticky top-0 z-30 flex h-16 items-center gap-4 border-b border-border bg-card px-4 lg:px-6">
-          <Button
-            variant="ghost"
-            size="icon"
-            className="lg:hidden"
-            onClick={() => setMobileOpen(!mobileOpen)}
+          <button
+            type="button"
+            onClick={() => setPaletteOpen(true)}
+            className="ml-auto hidden items-center gap-2 rounded-full border border-border bg-muted/40 px-3.5 py-1.5 text-sm text-muted-foreground transition-colors hover:border-ring/40 hover:text-foreground sm:flex"
           >
-            {mobileOpen ? <X className="h-5 w-5" /> : <Menu className="h-5 w-5" />}
-          </Button>
-          <h1 className="text-lg font-semibold">{title}</h1>
-          <div className="mx-auto hidden max-w-md flex-1 md:block">
-            <div className="relative">
-              <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-              <Input
-                placeholder="Search leads, campaigns..."
-                className="border-transparent bg-muted/40 pl-9"
-              />
-            </div>
-          </div>
-          <div className="ml-auto flex items-center gap-2">
-            <Button variant="ghost" size="icon">
-              <Bell className="h-5 w-5" />
-            </Button>
-            <Link
-              to="/settings"
-              className="flex h-8 w-8 items-center justify-center rounded-full bg-primary text-xs font-medium text-white"
+            <Search className="h-3.5 w-3.5" />
+            Search
+            <kbd className="ml-2 rounded border border-border bg-background px-1.5 py-0.5 text-[10px] font-medium">
+              ⌘K
+            </kbd>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setPaletteOpen(true)}
+            className="ml-auto flex h-9 w-9 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground sm:hidden"
+            aria-label="Search"
+          >
+            <Search className="h-4 w-4" />
+          </button>
+
+          <div className="flex items-center gap-1 sm:ml-1">
+            <ThemeToggle />
+            <button
+              type="button"
+              className="hidden h-9 w-9 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground sm:flex"
+              aria-label="Notifications"
             >
-              {initials}
-            </Link>
+              <Bell className="h-4 w-4" />
+            </button>
+
+            <DropdownMenu
+              trigger={
+                <button className="ml-1 flex h-9 w-9 items-center justify-center rounded-full bg-primary text-xs font-semibold text-primary-foreground ring-2 ring-transparent transition-all hover:ring-primary/30">
+                  {initials}
+                </button>
+              }
+            >
+              {(close) => (
+                <>
+                  <div className="mx-1.5 mb-1 px-2.5 py-1.5">
+                    <div className="truncate text-sm font-medium text-foreground">
+                      {profile?.full_name ?? profile?.email}
+                    </div>
+                    <div className="truncate text-xs text-muted-foreground">
+                      {organization?.name ?? "Workspace"}
+                    </div>
+                  </div>
+                  <div className="mx-3 mb-1 h-px bg-border" />
+                  <DropdownItem
+                    icon={<Settings className="h-4 w-4" />}
+                    onSelect={() => {
+                      close();
+                      navigate("/settings");
+                    }}
+                  >
+                    Settings
+                  </DropdownItem>
+                  <DropdownItem
+                    icon={<UsersRound className="h-4 w-4" />}
+                    onSelect={() => {
+                      close();
+                      navigate("/team");
+                    }}
+                  >
+                    Team
+                  </DropdownItem>
+                  <DropdownItem
+                    icon={<LogOut className="h-4 w-4" />}
+                    destructive
+                    onSelect={() => {
+                      close();
+                      handleSignOut();
+                    }}
+                  >
+                    Sign out
+                  </DropdownItem>
+                </>
+              )}
+            </DropdownMenu>
+
+            <button
+              type="button"
+              onClick={() => setMobileOpen((o) => !o)}
+              className="ml-1 flex h-9 w-9 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground lg:hidden"
+              aria-label="Menu"
+            >
+              {mobileOpen ? <X className="h-5 w-5" /> : <Menu className="h-5 w-5" />}
+            </button>
           </div>
-        </header>
-        <main className="flex-1 overflow-x-hidden p-4 lg:p-8">{children}</main>
-      </div>
+        </div>
+
+        {mobileOpen && (
+          <nav className="animate-slide-up border-t border-border bg-background px-4 py-3 lg:hidden">
+            <div className="grid grid-cols-2 gap-1.5">
+              {NAV.map((item) => {
+                const active = isActive(item.to);
+                const Icon = item.icon;
+                return (
+                  <NavLink
+                    key={item.to}
+                    to={item.to}
+                    className={cn(
+                      "flex items-center gap-2 rounded-lg px-3 py-2.5 text-sm font-medium transition-colors",
+                      active
+                        ? "bg-primary text-primary-foreground"
+                        : "bg-muted/60 text-foreground hover:bg-muted",
+                    )}
+                  >
+                    <Icon className="h-4 w-4" />
+                    {item.label}
+                  </NavLink>
+                );
+              })}
+            </div>
+          </nav>
+        )}
+      </header>
+
+      <main className="mx-auto w-full max-w-[100rem] flex-1 px-4 py-6 lg:px-8">{children}</main>
+
+      <CommandPalette open={paletteOpen} onClose={() => setPaletteOpen(false)} />
     </div>
   );
 }
