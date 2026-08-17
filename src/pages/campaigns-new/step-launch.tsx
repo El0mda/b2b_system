@@ -16,6 +16,7 @@ import {
 
 import { supabase } from "@/lib/supabase";
 import { useAuth } from "@/hooks/use-auth";
+import { logActivity } from "@/lib/activity";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -142,6 +143,17 @@ export function StepLaunch({
         .insert(leadRows)
         .select("id, email, first_name, last_name, full_name, company, job_title, location");
       if (leadsError) throw leadsError;
+
+      if (orgId && profile) {
+        const source = state.sourceTab === "lusha" ? "via Lusha" : "via import";
+        logActivity({
+          orgId,
+          actorId: profile.id,
+          action: "campaign_launched",
+          summary: `${profile.full_name ?? profile.email} launched campaign "${state.campaignName.trim()}" with ${selectedLeads.length} leads (${source})`,
+          metadata: { campaign_id: campaign.id, leads_count: selectedLeads.length, source: state.sourceTab },
+        });
+      }
 
       const sequenceRows = state.sequenceSteps.map((s) => ({
         campaign_id: campaign.id,

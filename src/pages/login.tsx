@@ -5,6 +5,7 @@ import { toast } from "sonner";
 
 import { supabase } from "@/lib/supabase";
 import { useAuth } from "@/hooks/use-auth";
+import { logActivity } from "@/lib/activity";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -35,9 +36,29 @@ export default function LoginPage() {
     }
     setSubmitting(true);
     try {
-      const { error } = await supabase.auth.signInWithPassword({ email, password });
+      const { data, error } = await supabase.auth.signInWithPassword({ email, password });
       if (error) throw error;
       toast.success("Welcome back!");
+
+      // Logged here, at the actual interactive sign-in, rather than in the
+      // auth listener — supabase-js also fires SIGNED_IN when a persisted
+      // session is restored on a plain page load/reload, which would
+      // otherwise spam the activity feed with an entry per reload.
+      if (data.user) {
+        const { data: prof } = await supabase
+          .from("users")
+          .select("org_id, full_name, email")
+          .eq("id", data.user.id)
+          .maybeSingle();
+        if (prof?.org_id) {
+          logActivity({
+            orgId: prof.org_id,
+            actorId: data.user.id,
+            action: "logged_in",
+            summary: `${prof.full_name ?? prof.email} logged in`,
+          });
+        }
+      }
     } catch (e: any) {
       toast.error(e?.message || "Sign-in failed");
     } finally {

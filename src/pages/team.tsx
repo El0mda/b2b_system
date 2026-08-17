@@ -11,10 +11,12 @@ import {
   X,
   Clock,
   MoreHorizontal,
+  Activity,
 } from "lucide-react";
 
 import { supabase } from "@/lib/supabase";
 import { useAuth } from "@/hooks/use-auth";
+import { logActivity } from "@/lib/activity";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -53,6 +55,13 @@ interface Invitation {
   role: string | null;
   created_at: string | null;
   accepted_at: string | null;
+}
+
+interface ActivityEntry {
+  id: string;
+  summary: string;
+  action: string;
+  created_at: string | null;
 }
 
 function roleBadge(role: string | null) {
@@ -116,26 +125,61 @@ export default function TeamPage() {
     },
   });
 
+  const { data: activity = [] } = useQuery<ActivityEntry[]>({
+    queryKey: ["team-activity", orgId],
+    enabled: !!orgId && canManage,
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("activity_log")
+        .select("id, summary, action, created_at")
+        .eq("org_id", orgId!)
+        .order("created_at", { ascending: false })
+        .limit(50);
+      if (error) throw error;
+      return (data ?? []) as ActivityEntry[];
+    },
+  });
+
   const updateRole = useMutation({
-    mutationFn: async ({ id, role }: { id: string; role: string }) => {
+    mutationFn: async ({ id, role }: { id: string; email: string; role: string }) => {
       const { error } = await supabase.from("users").update({ role }).eq("id", id);
       if (error) throw error;
     },
-    onSuccess: () => {
+    onSuccess: async (_data, { email, role }) => {
       qc.invalidateQueries({ queryKey: ["team-members", orgId] });
       toast.success("Role updated");
+      if (orgId && profile) {
+        await logActivity({
+          orgId,
+          actorId: profile.id,
+          action: "member_role_changed",
+          summary: `${profile.full_name ?? profile.email} changed ${email}'s role to ${role}`,
+          metadata: { target_email: email, new_role: role },
+        });
+        qc.invalidateQueries({ queryKey: ["team-activity", orgId] });
+      }
     },
     onError: (e: any) => toast.error(e?.message || "Failed to update role"),
   });
 
   const removeMember = useMutation({
-    mutationFn: async (id: string) => {
+    mutationFn: async ({ id }: { id: string; email: string }) => {
       const { error } = await supabase.from("users").update({ org_id: null }).eq("id", id);
       if (error) throw error;
     },
-    onSuccess: () => {
+    onSuccess: async (_data, { email }) => {
       qc.invalidateQueries({ queryKey: ["team-members", orgId] });
       toast.success("Member removed");
+      if (orgId && profile) {
+        await logActivity({
+          orgId,
+          actorId: profile.id,
+          action: "member_removed",
+          summary: `${profile.full_name ?? profile.email} removed ${email} from the team`,
+          metadata: { target_email: email },
+        });
+        qc.invalidateQueries({ queryKey: ["team-activity", orgId] });
+      }
     },
     onError: (e: any) => toast.error(e?.message || "Failed to remove member"),
   });
@@ -233,6 +277,7 @@ export default function TeamPage() {
                                     close();
                                     updateRole.mutate({
                                       id: m.id,
+                                      email: m.email ?? "",
                                       role: m.role === "admin" ? "member" : "admin",
                                     });
                                   }}
@@ -244,7 +289,7 @@ export default function TeamPage() {
                                   onSelect={() => {
                                     close();
                                     if (confirm(`Remove ${m.email} from the team?`)) {
-                                      removeMember.mutate(m.id);
+                                      removeMember.mutate({ id: m.id, email: m.email ?? "" });
                                     }
                                   }}
                                 >
@@ -312,13 +357,53 @@ export default function TeamPage() {
         </Card>
       )}
 
+      {canManage && (
+        <Card>
+          <CardHeader>
+            <div className="flex items-center gap-2">
+              <Activity className="h-5 w-5 text-primary" />
+              <CardTitle>Team Activity</CardTitle>
+            </div>
+            <CardDescription>What your team has been doing recently.</CardDescription>
+          </CardHeader>
+          <CardContent className="p-0">
+            {activity.length === 0 ? (
+              <div className="p-12 text-center">
+                <Activity className="mx-auto mb-3 h-10 w-10 text-muted-foreground/50" />
+                <p className="text-sm text-muted-foreground">No activity yet.</p>
+              </div>
+            ) : (
+              <ul className="divide-y divide-border">
+                {activity.map((a) => (
+                  <li key={a.id} className="flex items-center justify-between gap-4 px-5 py-3 text-sm">
+                    <span className="text-foreground">{a.summary}</span>
+                    <span className="shrink-0 whitespace-nowrap text-xs text-muted-foreground">
+                      {a.created_at
+                        ? new Date(a.created_at).toLocaleString(undefined, {
+                            month: "short",
+                            day: "numeric",
+                            hour: "numeric",
+                            minute: "2-digit",
+                          })
+                        : "—"}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </CardContent>
+        </Card>
+      )}
+
       <InviteDialog
         open={inviteOpen}
         orgId={orgId ?? null}
         invitedById={profile?.id ?? null}
+        invitedByName={profile?.full_name ?? profile?.email ?? "Someone"}
         onClose={() => setInviteOpen(false)}
         onSent={() => {
           qc.invalidateQueries({ queryKey: ["team-invitations", orgId] });
+          qc.invalidateQueries({ queryKey: ["team-activity", orgId] });
         }}
       />
     </div>
@@ -329,12 +414,14 @@ function InviteDialog({
   open,
   orgId,
   invitedById,
+  invitedByName,
   onClose,
   onSent,
 }: {
   open: boolean;
   orgId: string | null;
   invitedById: string | null;
+  invitedByName: string;
   onClose: () => void;
   onSent: () => void;
 }) {
@@ -359,6 +446,16 @@ function InviteDialog({
         invited_by: invitedById,
       });
       if (error) throw error;
+
+      if (invitedById) {
+        logActivity({
+          orgId,
+          actorId: invitedById,
+          action: "member_invited",
+          summary: `${invitedByName} invited ${email.trim()} as ${role}`,
+          metadata: { target_email: email.trim(), role },
+        });
+      }
 
       // Resend email delivery is wired in Phase 3 — for now we just record the invite.
       toast.success(`Invitation created for ${email.trim()}`);

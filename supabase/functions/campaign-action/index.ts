@@ -57,7 +57,7 @@ Deno.serve(async (req) => {
 
     const { data: campaign, error: campaignError } = await userClient
       .from("campaigns")
-      .select("id, smartlead_campaign_id")
+      .select("id, name, org_id, smartlead_campaign_id")
       .eq("id", campaign_id)
       .maybeSingle();
     if (campaignError || !campaign) {
@@ -103,6 +103,40 @@ Deno.serve(async (req) => {
         .update({ status: action })
         .eq("id", campaign_id);
       if (error) return json({ error: error.message }, 500);
+    }
+
+    // Best-effort activity log — never fail the request over a logging issue.
+    try {
+      // getUser() without an explicit token relies on the client's own
+      // internal session state, which this ephemeral server-side client
+      // never has — the Authorization header set via `global.headers` above
+      // is honored by .from()/PostgREST calls but not by auth-js's own
+      // requests, so the JWT has to be passed here explicitly.
+      const { data: authUser } = await userClient.auth.getUser(auth.replace(/^Bearer\s+/i, ""));
+      if (authUser?.user) {
+        const { data: actor } = await userClient
+          .from("users")
+          .select("full_name, email")
+          .eq("id", authUser.user.id)
+          .maybeSingle();
+        const actorName = (actor as any)?.full_name ?? (actor as any)?.email ?? "Someone";
+        const campaignName = (campaign as any).name ?? "campaign";
+        const summary =
+          action === "delete"
+            ? `${actorName} deleted campaign "${campaignName}"`
+            : action === "active"
+              ? `${actorName} activated campaign "${campaignName}"`
+              : `${actorName} set campaign "${campaignName}" to draft`;
+        await userClient.from("activity_log").insert({
+          org_id: (campaign as any).org_id,
+          actor_id: authUser.user.id,
+          action: action === "delete" ? "campaign_deleted" : "campaign_status_changed",
+          summary,
+          metadata: { campaign_id, new_status: action },
+        });
+      }
+    } catch (e) {
+      console.error("activity log failed:", e);
     }
 
     return json({ ok: true, synced_to_smartlead: !!slId });

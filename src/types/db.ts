@@ -303,6 +303,28 @@ export interface Database {
         Update: Partial<Database["public"]["Tables"]["invitations"]["Insert"]>;
         Relationships: [];
       };
+      activity_log: {
+        Row: {
+          id: string;
+          org_id: string | null;
+          actor_id: string | null;
+          action: string;
+          summary: string;
+          metadata: Record<string, unknown> | null;
+          created_at: string | null;
+        };
+        Insert: {
+          id?: string;
+          org_id?: string | null;
+          actor_id?: string | null;
+          action: string;
+          summary: string;
+          metadata?: Record<string, unknown> | null;
+          created_at?: string | null;
+        };
+        Update: Partial<Database["public"]["Tables"]["activity_log"]["Insert"]>;
+        Relationships: [];
+      };
     };
     Views: { [_ in never]: never };
     Functions: { [_ in never]: never };

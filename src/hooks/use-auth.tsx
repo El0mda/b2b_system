@@ -36,7 +36,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [organization, setOrganization] = useState<Organization | null>(null);
   const [loading, setLoading] = useState(true);
 
-  const loadProfile = async (userId: string) => {
+  const loadProfile = async (userId: string): Promise<Profile | null> => {
     const { data: prof } = await supabase
       .from("users")
       .select("id, org_id, full_name, email, role, avatar_url")
@@ -53,6 +53,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     } else {
       setOrganization(null);
     }
+    return prof ?? null;
   };
 
   const refresh = async () => {

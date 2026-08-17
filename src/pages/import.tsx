@@ -18,6 +18,7 @@ import { format } from "date-fns";
 
 import { supabase } from "@/lib/supabase";
 import { useAuth } from "@/hooks/use-auth";
+import { logActivity } from "@/lib/activity";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -75,7 +76,7 @@ interface ImportLogRow {
 }
 
 export default function ImportPage() {
-  const { organization } = useAuth();
+  const { organization, profile } = useAuth();
   const orgId = organization?.id;
   const qc = useQueryClient();
   const navigate = useNavigate();
@@ -216,6 +217,8 @@ export default function ImportPage() {
             try {
               const result = await runImport({
                 orgId,
+                actorId: profile?.id ?? null,
+                actorName: profile?.full_name ?? profile?.email ?? "Someone",
                 file,
                 parsed,
                 mapping,
@@ -721,6 +724,8 @@ function ImportHistory({
 // =========================================================
 async function runImport(opts: {
   orgId: string;
+  actorId: string | null;
+  actorName: string;
   file: File;
   parsed: ParsedFile;
   mapping: Record<string, LeadFieldKey>;
@@ -729,7 +734,7 @@ async function runImport(opts: {
   dedupe: boolean;
   verify: boolean;
 }): Promise<{ summary: ImportSummary; campaignId: string }> {
-  const { orgId, file, parsed, mapping, dedupe, verify } = opts;
+  const { orgId, actorId, actorName, file, parsed, mapping, dedupe, verify } = opts;
 
   // 1. Resolve campaign
   let campaignId = opts.campaignId;
@@ -922,6 +927,16 @@ async function runImport(opts: {
     status: failed > 0 ? "failed" : "completed",
     error_message: failed > 0 ? `${failed} rows failed to insert` : null,
   });
+
+  if (actorId && imported > 0) {
+    logActivity({
+      orgId,
+      actorId,
+      action: "leads_imported",
+      summary: `${actorName} imported ${imported} lead${imported === 1 ? "" : "s"} from ${file.name}`,
+      metadata: { campaign_id: campaignId, count: imported, file_name: file.name },
+    });
+  }
 
   return { summary, campaignId };
 }

@@ -29,6 +29,7 @@ import {
   FileEdit,
   PlayCircle,
   Trash2,
+  RefreshCw,
 } from "lucide-react";
 import {
   ResponsiveContainer,
@@ -237,6 +238,22 @@ export default function CampaignDetailPage() {
     onError: (e: any) => toast.error(e?.message || "Could not update campaign"),
   });
 
+  const syncStatus = useMutation({
+    mutationFn: async () => {
+      if (!id) return;
+      const { data, error } = await supabase.functions.invoke("smartlead-sync", {
+        body: { campaign_id: id },
+      });
+      if (error) throw error;
+      if (data?.error) throw new Error(data.error);
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["campaign-leads", id] });
+      toast.success("Delivery status refreshed from SmartLead");
+    },
+    onError: (e: any) => toast.error(e?.message || "Could not refresh status"),
+  });
+
   const deleteCampaign = useMutation({
     mutationFn: async () => {
       if (!id) return;
@@ -319,6 +336,16 @@ export default function CampaignDetailPage() {
           </div>
         </div>
 
+        <div className="flex items-center gap-2">
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={() => syncStatus.mutate()}
+          disabled={syncStatus.isPending}
+        >
+          <RefreshCw className={cn("h-4 w-4", syncStatus.isPending && "animate-spin")} />
+          Refresh status
+        </Button>
         <DropdownMenu
           trigger={
             <Button variant="outline" size="sm">
@@ -364,6 +391,7 @@ export default function CampaignDetailPage() {
             </>
           )}
         </DropdownMenu>
+        </div>
       </div>
 
       <Dialog open={confirmDelete} onClose={() => setConfirmDelete(false)}>

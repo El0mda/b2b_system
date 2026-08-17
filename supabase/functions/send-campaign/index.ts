@@ -236,6 +236,38 @@ Deno.serve(async (req) => {
       );
     }
 
+    // ── Step C.5: Capture SmartLead's lead ids ──
+    // The add-leads response above doesn't return per-lead ids, so read them
+    // back via the campaign's lead list and store them locally. This is what
+    // lets smartlead-sync later look up each lead's message history.
+    try {
+      const emailToLocalId = new Map((leads as Lead[]).map((l) => [l.email.toLowerCase(), l.id]));
+      let offset = 0;
+      const limit = 100;
+      for (;;) {
+        const listRes = await smartleadFetch(
+          `/campaigns/${slCampaignId}/leads?offset=${offset}&limit=${limit}`,
+          smartleadKey,
+        );
+        if (!listRes.ok) break;
+        const page = await listRes.json();
+        const rows: any[] = page?.data ?? [];
+        for (const row of rows) {
+          const localId = emailToLocalId.get(String(row.lead?.email ?? "").toLowerCase());
+          if (localId && row.lead?.id != null) {
+            await userClient
+              .from("leads")
+              .update({ smartlead_lead_id: String(row.lead.id) } as any)
+              .eq("id", localId);
+          }
+        }
+        offset += limit;
+        if (rows.length < limit || offset >= Number(page?.total_leads ?? 0)) break;
+      }
+    } catch (e) {
+      console.error("Failed to capture SmartLead lead ids:", e);
+    }
+
     // ── Step D: Fetch email accounts and assign to campaign ──
     const accountsRes = await smartleadFetch(
       "/email-accounts/",
