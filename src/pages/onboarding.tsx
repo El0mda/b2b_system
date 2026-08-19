@@ -1,6 +1,15 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { Check, ArrowRight, ArrowLeft, Sparkles, Building2, KeyRound, Rocket } from "lucide-react";
+import {
+  Check,
+  ArrowRight,
+  ArrowLeft,
+  Sparkles,
+  Building2,
+  KeyRound,
+  Rocket,
+  Users,
+} from "lucide-react";
 import { toast } from "sonner";
 
 import { supabase } from "@/lib/supabase";
@@ -75,10 +84,40 @@ export default function OnboardingPage() {
   const [fullName, setFullName] = useState("");
   const [bootstrapping, setBootstrapping] = useState(false);
 
+  // Catches a user who signed up fresh with an already-invited email (or had
+  // to confirm their email mid /invite/:token flow and lands here instead)
+  // rather than following the invite link directly.
+  const [pendingInvite, setPendingInvite] = useState<{
+    token: string;
+    org_name: string;
+    role: string;
+  } | null>(null);
+  const [inviteChecked, setInviteChecked] = useState(false);
+  const [showCreateInstead, setShowCreateInstead] = useState(false);
+  const [acceptingInvite, setAcceptingInvite] = useState(false);
+
   useEffect(() => {
     if (loading) return;
     if (!session) navigate("/login", { replace: true });
   }, [loading, session, navigate]);
+
+  useEffect(() => {
+    if (loading || !session || profile?.org_id) {
+      setInviteChecked(true);
+      return;
+    }
+    (async () => {
+      const { data } = await supabase.rpc("pending_invitation_for_current_user");
+      if (data && data.length > 0) {
+        setPendingInvite({
+          token: data[0].token,
+          org_name: data[0].org_name,
+          role: data[0].role,
+        });
+      }
+      setInviteChecked(true);
+    })();
+  }, [loading, session, profile?.org_id]);
 
   useEffect(() => {
     if (user?.user_metadata?.full_name) {
@@ -88,10 +127,28 @@ export default function OnboardingPage() {
     }
   }, [user]);
 
-  if (loading) return <FullPageSpinner />;
+  if (loading || !inviteChecked) return <FullPageSpinner />;
   if (!session) return null;
 
   const needsWorkspace = !profile?.org_id && !organization;
+
+  const handleAcceptInvite = async () => {
+    if (!pendingInvite) return;
+    setAcceptingInvite(true);
+    try {
+      const { data, error } = await supabase.rpc("accept_invitation", {
+        p_token: pendingInvite.token,
+      });
+      if (error) throw error;
+      await refresh();
+      toast.success(`Welcome to ${data?.[0]?.org_name ?? pendingInvite.org_name}!`);
+      navigate("/dashboard", { replace: true });
+    } catch (e: any) {
+      toast.error(e?.message || "Could not accept invitation");
+    } finally {
+      setAcceptingInvite(false);
+    }
+  };
 
   const handleBootstrap = async () => {
     if (!user) return;
@@ -154,9 +211,51 @@ export default function OnboardingPage() {
           <div className="mb-6 text-center">
             <LogoMark />
             <h1 className="text-xl font-semibold tracking-tight">Welcome to Campaign Commander</h1>
-            <p className="mt-1 text-sm text-muted-foreground">Let's set up your workspace.</p>
+            <p className="mt-1 text-sm text-muted-foreground">
+              {pendingInvite && !showCreateInstead
+                ? "You've been invited to a workspace."
+                : "Let's set up your workspace."}
+            </p>
           </div>
+
+          {pendingInvite && !showCreateInstead ? (
+            <div className="rounded-2xl border border-border bg-card/80 p-7 shadow-premium-lg backdrop-blur-sm">
+              <div className="mb-5 flex items-start gap-3">
+                <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-primary/10">
+                  <Users className="h-5 w-5 text-primary" />
+                </div>
+                <div>
+                  <h2 className="text-lg font-semibold">Join {pendingInvite.org_name}</h2>
+                  <p className="text-sm text-muted-foreground">
+                    You've been invited as a{" "}
+                    <strong className="text-foreground">{pendingInvite.role}</strong>.
+                  </p>
+                </div>
+              </div>
+              <Button className="w-full" onClick={handleAcceptInvite} disabled={acceptingInvite}>
+                {acceptingInvite && <Spinner />}
+                Accept invitation
+                {!acceptingInvite && <ArrowRight className="h-4 w-4" />}
+              </Button>
+              <button
+                type="button"
+                className="mt-4 w-full text-center text-xs text-muted-foreground hover:text-foreground hover:underline"
+                onClick={() => setShowCreateInstead(true)}
+              >
+                Create your own workspace instead
+              </button>
+            </div>
+          ) : (
           <div className="rounded-2xl border border-border bg-card/80 p-7 shadow-premium-lg backdrop-blur-sm">
+            {pendingInvite && (
+              <button
+                type="button"
+                className="mb-4 text-xs text-muted-foreground hover:text-foreground hover:underline"
+                onClick={() => setShowCreateInstead(false)}
+              >
+                ← Back to your invitation
+              </button>
+            )}
             <div className="mb-5 flex items-start gap-3">
               <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-primary/10">
                 <Building2 className="h-5 w-5 text-primary" />
@@ -196,6 +295,7 @@ export default function OnboardingPage() {
               </Button>
             </div>
           </div>
+          )}
         </div>
       </div>
     );

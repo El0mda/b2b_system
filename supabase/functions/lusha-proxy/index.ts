@@ -149,7 +149,10 @@ async function handleSearch(body: any, apiKey: string): Promise<Response> {
   }
 
   const payload: Record<string, any> = {
-    pages: { page: 1, size: Math.max(10, Math.min(body.max_leads || 25, 100)) },
+    pages: {
+      page: Math.max(1, Number(body.page) || 1),
+      size: Math.max(10, Math.min(body.max_leads || 25, 100)),
+    },
     filters: {
       contacts: { include: contactFilters },
       ...(Object.keys(companyFilters).length > 0 && {

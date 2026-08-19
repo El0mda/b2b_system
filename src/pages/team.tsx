@@ -437,15 +437,15 @@ function InviteDialog({
     }
     setSending(true);
     try {
-      const token = crypto.randomUUID();
-      const { error } = await supabase.from("invitations").insert({
-        org_id: orgId,
-        email: email.trim().toLowerCase(),
-        role,
-        token,
-        invited_by: invitedById,
+      const { data, error } = await supabase.functions.invoke("send-invitation", {
+        body: {
+          email: email.trim(),
+          role,
+          invite_link_base: window.location.origin,
+        },
       });
       if (error) throw error;
+      if (data?.error) throw new Error(data.error);
 
       if (invitedById) {
         logActivity({
@@ -457,8 +457,19 @@ function InviteDialog({
         });
       }
 
-      // Resend email delivery is wired in Phase 3 — for now we just record the invite.
-      toast.success(`Invitation created for ${email.trim()}`);
+      if (data?.email_sent) {
+        toast.success(`Invitation sent to ${email.trim()}`);
+      } else {
+        // Sandbox sending (no verified domain yet) can only deliver to the
+        // Resend account's own address — the invite still exists, so hand
+        // over the link to share manually rather than calling this a failure.
+        toast.success(`Invitation created for ${email.trim()}`, {
+          description: data?.invite_link
+            ? `Email couldn't be delivered yet — share this link directly: ${data.invite_link}`
+            : undefined,
+          duration: 10000,
+        });
+      }
       setEmail("");
       setRole("member");
       onSent();

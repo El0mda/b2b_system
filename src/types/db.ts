@@ -327,7 +327,26 @@ export interface Database {
       };
     };
     Views: { [_ in never]: never };
-    Functions: { [_ in never]: never };
+    Functions: {
+      get_invitation_preview: {
+        Args: { p_token: string };
+        Returns: {
+          org_name: string;
+          email: string;
+          role: string;
+          is_expired: boolean;
+          is_accepted: boolean;
+        }[];
+      };
+      accept_invitation: {
+        Args: { p_token: string };
+        Returns: { org_id: string; org_name: string }[];
+      };
+      pending_invitation_for_current_user: {
+        Args: Record<PropertyKey, never>;
+        Returns: { token: string; org_name: string; role: string }[];
+      };
+    };
     Enums: { [_ in never]: never };
     CompositeTypes: { [_ in never]: never };
   };

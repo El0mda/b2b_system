@@ -22,6 +22,12 @@ export interface LushaFilters {
 export interface LushaProspect {
   id: string;
   contactId: string;
+  // Lusha's search-then-enrich pattern ties a contactId to the specific
+  // search call that returned it — enrich must be called with the matching
+  // requestId, so each prospect carries the id of the page it came from
+  // (searches spanning multiple pages to backfill duplicates get a fresh
+  // requestId per page).
+  requestId: string;
   firstName: string;
   lastName: string;
   fullName: string;

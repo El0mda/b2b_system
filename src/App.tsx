@@ -4,6 +4,7 @@ import { AuthGate } from "@/components/layout/auth-gate";
 import LoginPage from "@/pages/login";
 import SignupPage from "@/pages/signup";
 import OnboardingPage from "@/pages/onboarding";
+import AcceptInvitePage from "@/pages/accept-invite";
 import DashboardPage from "@/pages/dashboard";
 import SettingsPage from "@/pages/settings";
 import TeamPage from "@/pages/team";
@@ -40,6 +41,7 @@ export default function App() {
       <Route path="/login" element={<LoginPage />} />
       <Route path="/signup" element={<SignupPage />} />
       <Route path="/onboarding" element={<OnboardingPage />} />
+      <Route path="/invite/:token" element={<AcceptInvitePage />} />
 
       <Route
         path="/dashboard"

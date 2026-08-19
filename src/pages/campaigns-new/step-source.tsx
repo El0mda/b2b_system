@@ -21,6 +21,7 @@ import {
 } from "lucide-react";
 
 import { supabase } from "@/lib/supabase";
+import { useAuth } from "@/hooks/use-auth";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -145,6 +146,8 @@ function LushaTab({
   state: WizardState;
   setState: (updater: (prev: WizardState) => WizardState) => void;
 }) {
+  const { organization } = useAuth();
+  const orgId = organization?.id;
   const [view, setView] = useState<"filters" | "results">(
     state.leads.length > 0 ? "results" : "filters",
   );
@@ -160,7 +163,6 @@ function LushaTab({
   const [searching, setSearching] = useState(false);
   const [enriching, setEnriching] = useState(false);
   const [prospects, setProspects] = useState<LushaProspect[]>([]);
-  const [searchRequestId, setSearchRequestId] = useState<string | null>(null);
   const [selectedProspectIds, setSelectedProspectIds] = useState<Set<string>>(
     new Set(),
   );
@@ -304,36 +306,77 @@ function LushaTab({
     }
     setSearching(true);
     try {
-      const { data, error } = await supabase.functions.invoke("lusha-proxy", {
-        body: { action: "search", ...filters },
-      });
-      if (error) throw new Error(error.message || "Search failed");
-      const results: LushaProspect[] = (data?.prospects ?? []).map(
-        (p: any) => ({
-          id: p.contactId,
-          contactId: p.contactId,
-          firstName: p.name?.split(" ")[0] ?? "",
-          lastName: p.name?.split(" ").slice(1).join(" ") ?? "",
-          fullName: p.name ?? "",
-          jobTitle: p.jobTitle ?? "",
-          company: p.companyName ?? "",
-          website: p.fqdn ?? "",
-          location: "",
-          linkedinUrl: "",
-          hasEmail: p.hasWorkEmail ?? p.hasEmails ?? false,
-          hasPhone: p.hasPhones ?? false,
-          industry: "",
-          companySize: "",
-          revenue: "",
-        }),
-      );
-      setProspects(results);
-      setSearchRequestId(data?.requestId ?? null);
+      // Contacts this org already has (from a prior Lusha search+enrich)
+      // are filtered out before the user ever sees them, and backfilled
+      // with extra pages below — so asking for 50 leads always yields 50
+      // new ones, not 50-minus-duplicates.
+      const existingContactIds = new Set<string>();
+      if (orgId) {
+        const { data: existing } = await supabase
+          .from("leads")
+          .select("contact_id")
+          .eq("org_id", orgId)
+          .not("contact_id", "is", null);
+        (existing ?? []).forEach((r: any) => r.contact_id && existingContactIds.add(r.contact_id));
+      }
+
+      const target = filters.max_leads || 25;
+      const seen = new Set<string>();
+      const collected: LushaProspect[] = [];
+      const MAX_PAGES = 6;
+      let page = 1;
+      let exhausted = false;
+
+      while (collected.length < target && page <= MAX_PAGES && !exhausted) {
+        const { data, error } = await supabase.functions.invoke("lusha-proxy", {
+          body: { action: "search", ...filters, page },
+        });
+        if (error) throw new Error(error.message || "Search failed");
+
+        const rawPage: any[] = data?.prospects ?? [];
+        if (rawPage.length === 0) {
+          exhausted = true;
+          break;
+        }
+
+        const requestId = data?.requestId ?? "";
+        for (const p of rawPage) {
+          if (collected.length >= target) break;
+          if (seen.has(p.contactId) || existingContactIds.has(p.contactId)) continue;
+          seen.add(p.contactId);
+          collected.push({
+            id: p.contactId,
+            contactId: p.contactId,
+            requestId,
+            firstName: p.name?.split(" ")[0] ?? "",
+            lastName: p.name?.split(" ").slice(1).join(" ") ?? "",
+            fullName: p.name ?? "",
+            jobTitle: p.jobTitle ?? "",
+            company: p.companyName ?? "",
+            website: p.fqdn ?? "",
+            location: "",
+            linkedinUrl: "",
+            hasEmail: p.hasWorkEmail ?? p.hasEmails ?? false,
+            hasPhone: p.hasPhones ?? false,
+            industry: "",
+            companySize: "",
+            revenue: "",
+          });
+        }
+        if (rawPage.length < target) exhausted = true; // last page from Lusha
+        page++;
+      }
+
+      setProspects(collected);
       setSelectedProspectIds(new Set());
-      if (results.length === 0) {
+      if (collected.length === 0) {
         toast.info("No leads found matching your filters");
+      } else if (collected.length < target) {
+        toast.success(
+          `Found ${collected.length} new leads (fewer than ${target} available after skipping duplicates)`,
+        );
       } else {
-        toast.success(`Found ${results.length} leads`);
+        toast.success(`Found ${collected.length} leads`);
       }
       setView("results");
     } catch (e: any) {
@@ -349,22 +392,32 @@ function LushaTab({
       toast.error("Select leads to enrich");
       return;
     }
-    if (!searchRequestId) {
-      toast.error("Search session expired, please search again");
-      return;
-    }
     setEnriching(true);
     try {
-      const { data, error } = await supabase.functions.invoke("lusha-proxy", {
-        body: {
-          action: "enrich",
-          requestId: searchRequestId,
-          contactIds: selected.map((p) => p.contactId),
-        },
-      });
-      if (error) throw new Error(error.message);
+      // Prospects can come from multiple search pages (backfilling
+      // duplicates fetches extra pages), and each page has its own
+      // requestId that its contactIds must be enriched against — so batch
+      // per requestId rather than assuming one search session for all.
+      const byRequestId = new Map<string, LushaProspect[]>();
+      for (const p of selected) {
+        const group = byRequestId.get(p.requestId) ?? [];
+        group.push(p);
+        byRequestId.set(p.requestId, group);
+      }
 
-      const enrichedContacts: any[] = data?.contacts ?? [];
+      const enrichedContacts: any[] = [];
+      for (const [requestId, group] of byRequestId) {
+        const { data, error } = await supabase.functions.invoke("lusha-proxy", {
+          body: {
+            action: "enrich",
+            requestId,
+            contactIds: group.map((p) => p.contactId),
+          },
+        });
+        if (error) throw new Error(error.message);
+        enrichedContacts.push(...(data?.contacts ?? []));
+      }
+
       const prospectMap = new Map(prospects.map((p) => [p.contactId, p]));
       const enriched: WizardLead[] = await Promise.all(
         enrichedContacts.map(async (c: any) => {
@@ -388,6 +441,7 @@ function LushaTab({
           }
           const fullName = p?.fullName ?? d.fullName ?? "";
           return {
+            id: p?.contactId ?? c.id ?? c.contactId ?? undefined,
             email: email || `${fullName.replace(/\s+/g, ".")}@unknown.com`,
             first_name: p?.firstName ?? d.firstName ?? "",
             last_name: p?.lastName ?? d.lastName ?? "",

@@ -123,6 +123,7 @@ export function StepLaunch({
         org_id: orgId,
         campaign_id: campaign.id,
         source: state.sourceTab === "lusha" ? "lusha" : "import",
+        contact_id: l.id ?? null,
         email: l.email,
         first_name: l.first_name ?? null,
         last_name: l.last_name ?? null,
