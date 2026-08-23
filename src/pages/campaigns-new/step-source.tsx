@@ -748,19 +748,20 @@ function LushaTab({
                 300,
               );
             }}
-            placeholder="Type to search technologies..."
+            placeholder="Search technologies..."
             onKeyDown={(e) => {
-              if (e.key === "Enter" && techQuery.trim()) {
+              if (e.key === "Enter" && techSuggestions.length > 0) {
                 e.preventDefault();
+                const s = techSuggestions[0];
                 const current = filters.technologies ?? [];
-                if (!current.includes(techQuery.trim())) {
+                if (!current.includes(s.name)) {
                   setState((p) => ({
                     ...p,
                     lushaFilters: {
                       ...p.lushaFilters,
                       technologies: [
                         ...(p.lushaFilters.technologies ?? []),
-                        techQuery.trim(),
+                        s.name,
                       ],
                     },
                   }));
