@@ -181,14 +181,14 @@ function LushaTab({
     [],
   );
   const [jobTitleInput, setJobTitleInput] = useState("");
-  const [jobTitleSuggestions, setJobTitleSuggestions] = useState<
-    LushaFilterOption[]
-  >([]);
+  const [contactLocationQuery, setContactLocationQuery] = useState("");
+  const [contactLocationSuggestions, setContactLocationSuggestions] =
+    useState<LushaFilterOption[]>([]);
 
   const companyTimeout = useRef<ReturnType<typeof setTimeout>>();
   const locationTimeout = useRef<ReturnType<typeof setTimeout>>();
   const techTimeout = useRef<ReturnType<typeof setTimeout>>();
-  const jobTitleTimeout = useRef<ReturnType<typeof setTimeout>>();
+  const contactLocationTimeout = useRef<ReturnType<typeof setTimeout>>();
 
   const filters = state.lushaFilters;
 
@@ -836,20 +836,7 @@ function LushaTab({
         <div className="relative">
           <Input
             value={jobTitleInput}
-            onChange={(e) => {
-              setJobTitleInput(e.target.value);
-              clearTimeout(jobTitleTimeout.current);
-              // For job titles we use free-text + search from Lusha
-              jobTitleTimeout.current = setTimeout(
-                () =>
-                  autocomplete(
-                    "autocomplete-technologies",
-                    e.target.value,
-                    setJobTitleSuggestions,
-                  ),
-                300,
-              );
-            }}
+            onChange={(e) => setJobTitleInput(e.target.value)}
             placeholder="Type job title and press Enter..."
             onKeyDown={(e) => {
               if (e.key === "Enter" && jobTitleInput.trim()) {
@@ -868,7 +855,6 @@ function LushaTab({
                   }));
                 }
                 setJobTitleInput("");
-                setJobTitleSuggestions([]);
               }
             }}
           />
@@ -898,22 +884,34 @@ function LushaTab({
         </div>
 
         {/* Contact Location */}
-        <div className="space-y-1.5">
-          <Label>Contact Location</Label>
-          <Input
-            value={filters.contact_location ?? ""}
-            onChange={(e) =>
-              setState((p) => ({
-                ...p,
-                lushaFilters: {
-                  ...p.lushaFilters,
-                  contact_location: e.target.value,
-                },
-              }))
-            }
-            placeholder="e.g. United States"
-          />
-        </div>
+        <AutocompleteField
+          label="Contact Location"
+          icon={<MapPin className="h-4 w-4" />}
+          value={contactLocationQuery}
+          onChange={(v) => {
+            setContactLocationQuery(v);
+            clearTimeout(contactLocationTimeout.current);
+            contactLocationTimeout.current = setTimeout(
+              () =>
+                autocomplete(
+                  "autocomplete-contact-locations",
+                  v,
+                  setContactLocationSuggestions,
+                ),
+              300,
+            );
+          }}
+          suggestions={contactLocationSuggestions}
+          onSelect={(s) => {
+            setContactLocationQuery(s.name);
+            setContactLocationSuggestions([]);
+            setState((p) => ({
+              ...p,
+              lushaFilters: { ...p.lushaFilters, contact_location: s.name },
+            }));
+          }}
+          placeholder="Search contact location..."
+        />
       </div>
 
       {/* Seniority Checkboxes */}

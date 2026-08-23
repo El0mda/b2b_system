@@ -448,7 +448,7 @@ function InviteDialog({
       if (data?.error) throw new Error(data.error);
 
       if (invitedById) {
-        logActivity({
+        await logActivity({
           orgId,
           actorId: invitedById,
           action: "member_invited",
