@@ -7,6 +7,8 @@ interface DropdownMenuProps {
   align?: "start" | "end";
   className?: string;
   children: (close: () => void) => ReactNode;
+  /** Size the panel to the trigger's width instead of its content (useful for form-field-style triggers). */
+  matchTriggerWidth?: boolean;
 }
 
 export function DropdownMenu({
@@ -14,9 +16,10 @@ export function DropdownMenu({
   align = "end",
   className,
   children,
+  matchTriggerWidth,
 }: DropdownMenuProps) {
   const [open, setOpen] = useState(false);
-  const [pos, setPos] = useState({ top: 0, left: 0 });
+  const [pos, setPos] = useState({ top: 0, left: 0, width: 0 });
   const triggerRef = useRef<HTMLDivElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
 
@@ -28,6 +31,7 @@ export function DropdownMenu({
     setPos({
       top: rect.bottom + window.scrollY + 6,
       left: align === "end" ? rect.right + window.scrollX : rect.left + window.scrollX,
+      width: rect.width,
     });
   }, [open, align]);
 
@@ -56,8 +60,14 @@ export function DropdownMenu({
   }, [open]);
 
   return (
-    <div className="relative inline-block" ref={triggerRef}>
-      <div onClick={() => setOpen((o) => !o)} className="inline-flex">
+    <div
+      className={cn("relative", matchTriggerWidth ? "block" : "inline-block")}
+      ref={triggerRef}
+    >
+      <div
+        onClick={() => setOpen((o) => !o)}
+        className={matchTriggerWidth ? "block" : "inline-flex"}
+      >
         {trigger}
       </div>
       {open &&
@@ -68,11 +78,17 @@ export function DropdownMenu({
               position: "absolute",
               top: pos.top,
               left: pos.left,
-              transform: align === "end" ? "translateX(-100%)" : undefined,
+              width: matchTriggerWidth ? pos.width : undefined,
+              transform:
+                !matchTriggerWidth && align === "end"
+                  ? "translateX(-100%)"
+                  : undefined,
             }}
             className={cn(
               "z-50 min-w-[10rem] animate-scale-in overflow-hidden rounded-xl border border-border bg-card py-1.5 shadow-premium-lg",
-              align === "end" ? "origin-top-right" : "origin-top-left",
+              align === "end" && !matchTriggerWidth
+                ? "origin-top-right"
+                : "origin-top-left",
               className,
             )}
           >

@@ -1,0 +1,87 @@
+import type { LushaFilterOption } from "./lusha";
+
+// Starter lists shown the instant a search-as-you-type field is opened,
+// before the user has typed the 2+ characters Lusha's autocomplete needs.
+// Not Lusha data — replaced by live results as soon as a real query fires.
+
+const asOptions = (values: string[]): LushaFilterOption[] =>
+  values.map((name) => ({ id: name, name }));
+
+export const DEFAULT_LOCATIONS: LushaFilterOption[] = asOptions([
+  "United States",
+  "United Kingdom",
+  "Canada",
+  "Germany",
+  "France",
+  "Spain",
+  "Italy",
+  "Netherlands",
+  "Sweden",
+  "Switzerland",
+  "Ireland",
+  "Belgium",
+  "Poland",
+  "Portugal",
+  "Australia",
+  "New Zealand",
+  "India",
+  "Singapore",
+  "Japan",
+  "China",
+  "United Arab Emirates",
+  "Saudi Arabia",
+  "Israel",
+  "Egypt",
+  "South Africa",
+  "Brazil",
+  "Mexico",
+  "Argentina",
+  "Nigeria",
+  "Kenya",
+]);
+
+export const DEFAULT_TECHNOLOGIES: LushaFilterOption[] = asOptions([
+  "Salesforce",
+  "HubSpot",
+  "Microsoft 365",
+  "Google Workspace",
+  "AWS",
+  "Microsoft Azure",
+  "Slack",
+  "Zoom",
+  "Shopify",
+  "WordPress",
+  "Zendesk",
+  "Marketo",
+  "Mailchimp",
+  "Stripe",
+  "Workday",
+  "SAP",
+  "Oracle",
+  "Atlassian Jira",
+  "Okta",
+  "Intercom",
+]);
+
+export const DEFAULT_JOB_TITLES: LushaFilterOption[] = asOptions([
+  "Chief Executive Officer",
+  "Chief Technology Officer",
+  "Chief Financial Officer",
+  "Chief Marketing Officer",
+  "Chief Operating Officer",
+  "VP of Sales",
+  "VP of Marketing",
+  "VP of Engineering",
+  "Sales Manager",
+  "Marketing Manager",
+  "Product Manager",
+  "Project Manager",
+  "Account Executive",
+  "Business Development Manager",
+  "Software Engineer",
+  "Human Resources Manager",
+  "Operations Manager",
+  "Customer Success Manager",
+  "Director of Sales",
+  "Director of Marketing",
+]);

@@ -34,6 +34,10 @@ export default {
           DEFAULT: "hsl(var(--card))",
           foreground: "hsl(var(--card-foreground))",
         },
+        popover: {
+          DEFAULT: "hsl(var(--popover))",
+          foreground: "hsl(var(--popover-foreground))",
+        },
         // Brand hues sampled from the etriplesoft logo — for direct, deliberate
         // use (decorative gradients, brand marks), not as semantic UI tokens.
         brand: {

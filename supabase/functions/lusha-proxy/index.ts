@@ -59,6 +59,7 @@ Deno.serve(async (req) => {
       case "autocomplete-locations":
       case "autocomplete-contact-locations":
       case "autocomplete-technologies":
+      case "autocomplete-job-titles":
         return await handleAutocomplete(action, body.query ?? "", apiKey);
       case "search":
         return await handleSearch(body, apiKey);
@@ -99,22 +100,46 @@ async function handleAutocomplete(
 ): Promise<Response> {
   if (!query || query.length < 2) return json({ results: [] });
   const pathMap: Record<string, string> = {
-    "autocomplete-companies": "/prospecting/filters/companies/autocomplete",
-    "autocomplete-locations": "/prospecting/filters/locations/autocomplete",
-    "autocomplete-contact-locations":
-      "/prospecting/filters/contact-locations/autocomplete",
-    "autocomplete-technologies":
-      "/prospecting/filters/technologies/autocomplete",
+    "autocomplete-companies": "/prospecting/filters/companies/names",
+    "autocomplete-locations": "/prospecting/filters/companies/locations",
+    "autocomplete-contact-locations": "/prospecting/filters/contacts/locations",
+    "autocomplete-technologies": "/prospecting/filters/companies/technologies",
+    "autocomplete-job-titles": "/prospecting/filters/contacts/job_titles",
   };
   const path = pathMap[action];
   if (!path) return json({ error: "Unknown autocomplete" }, 400);
-  const res = await fetch(
-    `${LUSHA_API}${path}?q=${encodeURIComponent(query)}`,
-    { headers: { api_key: apiKey } },
-  );
+  const res = await fetch(`${LUSHA_API}${path}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", api_key: apiKey },
+    body: JSON.stringify({ text: query }),
+  });
   if (!res.ok) return json({ results: [] });
-  const data = await res.json();
-  return json({ results: Array.isArray(data) ? data : (data?.results ?? []) });
+  const raw = await res.json();
+  const list: any[] = Array.isArray(raw) ? raw : (raw?.results ?? []);
+
+  let results: { id: string; name: string }[];
+  if (action === "autocomplete-companies") {
+    results = list.map((r) => ({
+      id: String(r.companyId ?? r.fqdn ?? r.name),
+      name: r.name,
+    }));
+  } else if (action === "autocomplete-job-titles") {
+    results = list.map((r) => ({ id: r.title, name: r.title }));
+  } else if (
+    action === "autocomplete-locations" ||
+    action === "autocomplete-contact-locations"
+  ) {
+    // Lusha returns structured {continent, country, state, city}; search
+    // filters only support matching by country, so the country is the
+    // stored value while the fuller string is shown to the user.
+    results = list.map((r) => ({
+      id: r.country ?? [r.city, r.state, r.country].filter(Boolean).join(", "),
+      name: [r.city, r.state, r.country].filter(Boolean).join(", "),
+    }));
+  } else {
+    results = list.map((r) => ({ id: r.name, name: r.name }));
+  }
+  return json({ results });
 }
 
 async function handleSearch(body: any, apiKey: string): Promise<Response> {
@@ -122,7 +147,7 @@ async function handleSearch(body: any, apiKey: string): Promise<Response> {
   const companyFilters: Record<string, any> = {};
 
   if (body.job_titles?.length) contactFilters.jobTitles = body.job_titles;
-  if (body.department) contactFilters.departments = [body.department];
+  if (body.departments?.length) contactFilters.departments = body.departments;
   if (body.seniorities?.length)
     contactFilters.seniority = body.seniorities.map(Number);
   if (body.contact_location)

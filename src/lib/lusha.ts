@@ -12,7 +12,7 @@ export interface LushaFilters {
   revenue?: string;
   technologies?: string[];
   job_titles?: string[];
-  department?: string;
+  departments?: string[];
   seniorities?: string[];
   contact_location?: string;
   data_points?: string[];
