@@ -31,7 +31,7 @@ import {
 import { Spinner } from "@/components/ui/spinner";
 import { processTemplate } from "@/lib/template";
 import { calculateScheduledDate } from "@/lib/sequence-presets";
-import { cn } from "@/lib/utils";
+import { cn, getFunctionErrorMessage } from "@/lib/utils";
 import type { WizardState } from "./types";
 
 type LaunchPhase =
@@ -180,7 +180,7 @@ export function StepLaunch({
         }
         fnData = data;
       } catch (fnError: any) {
-        const msg = fnError?.message || fnError?.error || String(fnError);
+        const msg = await getFunctionErrorMessage(fnError);
         console.error("send-campaign function failed:", fnError);
         setLaunchError(`SmartLead error: ${msg}`);
         toast.error(`Campaign saved but sending failed: ${msg}`);
