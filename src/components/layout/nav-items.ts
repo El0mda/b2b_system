@@ -4,6 +4,7 @@ import {
   Users,
   Upload,
   BarChart3,
+  Kanban,
   type LucideIcon,
 } from "lucide-react";
 
@@ -17,6 +18,7 @@ export const NAV: NavItem[] = [
   { label: "Dashboard", to: "/dashboard", icon: LayoutDashboard },
   { label: "Campaigns", to: "/campaigns", icon: Rocket },
   { label: "Leads", to: "/leads", icon: Users },
+  { label: "Pipeline", to: "/crm", icon: Kanban },
   { label: "Import", to: "/import", icon: Upload },
   { label: "Analytics", to: "/analytics", icon: BarChart3 },
 ];

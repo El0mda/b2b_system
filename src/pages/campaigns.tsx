@@ -70,11 +70,13 @@ interface CampaignRow {
   delivered: number;
   opened: number;
   replied: number;
+  creator: { full_name: string | null; email: string | null } | null;
 }
 
 export default function CampaignsPage() {
-  const { organization } = useAuth();
+  const { organization, profile } = useAuth();
   const orgId = organization?.id;
+  const isAdmin = profile?.role === "owner" || profile?.role === "admin";
   const qc = useQueryClient();
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
@@ -84,9 +86,13 @@ export default function CampaignsPage() {
     queryKey: ["campaigns", orgId],
     enabled: !!orgId,
     queryFn: async () => {
+      // RLS scopes this to campaigns the caller created — or, for
+      // owner/admin, every campaign in the org.
       const { data, error } = await supabase
         .from("campaigns")
-        .select("id, name, status, source, leads_added, created_at")
+        .select(
+          "id, name, status, source, leads_added, created_at, creator:created_by(full_name, email)",
+        )
         .eq("org_id", orgId!)
         .order("created_at", { ascending: false });
       if (error) throw error;
@@ -232,6 +238,7 @@ export default function CampaignsPage() {
                   <TableHead>Opened</TableHead>
                   <TableHead>Replied</TableHead>
                   <TableHead>Created</TableHead>
+                  {isAdmin && <TableHead>Created By</TableHead>}
                   <TableHead className="text-right">Actions</TableHead>
                 </TableRow>
               </TableHeader>
@@ -288,6 +295,11 @@ export default function CampaignsPage() {
                       <TableCell className="text-muted-foreground">
                         {c.created_at ? format(new Date(c.created_at), "MMM d, yyyy") : "—"}
                       </TableCell>
+                      {isAdmin && (
+                        <TableCell className="text-muted-foreground">
+                          {c.creator?.full_name ?? c.creator?.email ?? "—"}
+                        </TableCell>
+                      )}
                       <TableCell className="text-right">
                         <div className="flex items-center justify-end gap-1">
                           <Button asChild variant="ghost" size="sm">

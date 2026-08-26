@@ -13,6 +13,7 @@ import ImportPage from "@/pages/import";
 import NewCampaignPage from "@/pages/campaigns-new";
 import CampaignDetailPage from "@/pages/campaign-detail";
 import LeadsPage from "@/pages/leads";
+import CrmPage from "@/pages/crm";
 import AnalyticsPage from "@/pages/analytics";
 
 function NotFound() {
@@ -80,6 +81,14 @@ export default function App() {
         element={
           <AuthGate>
             <LeadsPage />
+          </AuthGate>
+        }
+      />
+      <Route
+        path="/crm"
+        element={
+          <AuthGate>
+            <CrmPage />
           </AuthGate>
         }
       />
