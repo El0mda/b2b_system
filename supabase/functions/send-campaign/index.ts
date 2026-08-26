@@ -275,14 +275,13 @@ Deno.serve(async (req) => {
       { method: "GET" },
     );
     let emailAccountId: number | null = null;
+    const senderEmail = (campaign as any).sender_email;
     if (accountsRes.ok) {
       const accounts = await accountsRes.json();
-      // Find the account matching leads@etriplesoft.com
+      // Find the SmartLead-connected account matching this campaign's sender.
       const target = Array.isArray(accounts)
         ? accounts.find(
-            (a: any) =>
-              a.from_email === "leads@etriplesoft.com" ||
-              a.email === "leads@etriplesoft.com",
+            (a: any) => a.from_email === senderEmail || a.email === senderEmail,
           )
         : null;
       if (target) {
@@ -307,7 +306,7 @@ Deno.serve(async (req) => {
       }
     } else {
       console.warn(
-        "Could not find email account for leads@etriplesoft.com — campaign may have no sender",
+        `Could not find SmartLead email account for ${senderEmail} — campaign may have no sender`,
       );
     }
 
@@ -419,7 +418,7 @@ Deno.serve(async (req) => {
       smartlead_campaign_id: slCampaignId,
       leads_added: (leads as Lead[]).length,
       sequence_steps: (sequences as SequenceRow[]).length,
-      sender_email: "leads@etriplesoft.com",
+      sender_email: senderEmail,
       email_account_id: emailAccountId,
       scheduled: true,
       start_response: startTxt,

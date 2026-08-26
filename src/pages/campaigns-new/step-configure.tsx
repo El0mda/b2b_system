@@ -49,7 +49,7 @@ export function StepConfigure({
           </div>
 
           <div className="rounded-md border border-blue-500/20 bg-blue-500/10 p-3 text-sm text-blue-700 dark:text-blue-400">
-            All emails will be sent from <span className="font-mono font-medium">leads@etriplesoft.com</span> via SmartLead SMTP.
+            All emails will be sent from <span className="font-mono font-medium">mariam.nasser@etriplesoft.com</span> via SmartLead SMTP.
           </div>
         </CardContent>
       </Card>

@@ -106,9 +106,9 @@ export function StepLaunch({
           name: state.campaignName.trim(),
           status: "active",
           source: state.sourceTab === "lusha" ? "lusha" : "import",
-          sender_email: "leads@etriplesoft.com",
+          sender_email: "mariam.nasser@etriplesoft.com",
           sender_name: "Etriplesoft",
-          reply_to_email: state.reply_to_email || "leads@etriplesoft.com",
+          reply_to_email: state.reply_to_email || "mariam.nasser@etriplesoft.com",
           timezone: state.timezone,
           leads_added: selectedLeads.length,
           leads_searched: leadsSearched,
@@ -232,7 +232,7 @@ export function StepLaunch({
           <SummaryRow label="Campaign name" value={state.campaignName} />
           <SummaryRow
             label="Sender"
-            value="leads@etriplesoft.com (SmartLead SMTP)"
+            value="mariam.nasser@etriplesoft.com (SmartLead SMTP)"
           />
           <SummaryRow label="Timezone" value={state.timezone} />
           <SummaryRow label="Leads" value={String(selectedLeads.length)} />
@@ -313,7 +313,7 @@ export function StepLaunch({
           <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
           <div>
             This will send emails to <strong>{selectedLeads.length}</strong> contacts from{" "}
-            <strong>leads@etriplesoft.com</strong>. Step 1 sends immediately;
+            <strong>mariam.nasser@etriplesoft.com</strong>. Step 1 sends immediately;
             steps 2+ are scheduled.
           </div>
         </div>
