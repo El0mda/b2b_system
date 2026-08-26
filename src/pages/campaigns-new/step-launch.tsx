@@ -68,6 +68,7 @@ export function StepLaunch({
   const [showLeads, setShowLeads] = useState(false);
   const [showSequences, setShowSequences] = useState(false);
   const [launchError, setLaunchError] = useState<string | null>(null);
+  const [launchWarning, setLaunchWarning] = useState<string | null>(null);
   const [launchedCampaignId, setLaunchedCampaignId] = useState<string | null>(null);
   const [phaseResult, setPhaseResult] = useState<PhaseResult>({});
 
@@ -91,12 +92,48 @@ export function StepLaunch({
       return;
     }
     setLaunchError(null);
+    setLaunchWarning(null);
 
     try {
       setPhase("saving");
-      const leadsSearched = selectedLeads.length;
-      const leadsEnriched = selectedLeads.filter((l) => l.has_work_email || !!l.email).length;
-      const leadsVerified = selectedLeads.filter((l) => l.nb_result).length;
+
+      // Final cross-source dedup safety net — the Lusha search step and
+      // the import tab each dedup within their own source, but a lead
+      // reaching this common launch point could still already exist in
+      // the org from the *other* source (or an earlier campaign).
+      let newLeads = selectedLeads;
+      const emails = selectedLeads.map((l) => l.email).filter(Boolean);
+      if (emails.length > 0) {
+        const existing = new Set<string>();
+        const CHUNK = 500;
+        for (let i = 0; i < emails.length; i += CHUNK) {
+          const slice = emails.slice(i, i + CHUNK);
+          const { data } = await supabase
+            .from("leads")
+            .select("email")
+            .eq("org_id", orgId)
+            .in("email", slice);
+          (data ?? []).forEach((r: any) => r.email && existing.add(r.email.toLowerCase()));
+        }
+        newLeads = selectedLeads.filter(
+          (l) => !l.email || !existing.has(l.email.toLowerCase()),
+        );
+        const skipped = selectedLeads.length - newLeads.length;
+        if (skipped > 0) {
+          toast.info(
+            `${skipped} lead${skipped === 1 ? "" : "s"} already in your database — skipped`,
+          );
+        }
+      }
+      if (newLeads.length === 0) {
+        toast.error("All selected leads are already in your database");
+        setPhase("idle");
+        return;
+      }
+
+      const leadsSearched = newLeads.length;
+      const leadsEnriched = newLeads.filter((l) => l.has_work_email || !!l.email).length;
+      const leadsVerified = newLeads.filter((l) => l.nb_result).length;
 
       const { data: campaign, error: campaignError } = await supabase
         .from("campaigns")
@@ -110,7 +147,7 @@ export function StepLaunch({
           sender_name: "Etriplesoft",
           reply_to_email: state.reply_to_email || "mariam.nasser@etriplesoft.com",
           timezone: state.timezone,
-          leads_added: selectedLeads.length,
+          leads_added: newLeads.length,
           leads_searched: leadsSearched,
           leads_enriched: leadsEnriched,
           leads_verified: leadsVerified,
@@ -119,7 +156,7 @@ export function StepLaunch({
         .single();
       if (campaignError) throw campaignError;
 
-      const leadRows = selectedLeads.map((l) => ({
+      const leadRows = newLeads.map((l) => ({
         org_id: orgId,
         campaign_id: campaign.id,
         source: state.sourceTab === "lusha" ? "lusha" : "import",
@@ -151,8 +188,8 @@ export function StepLaunch({
           orgId,
           actorId: profile.id,
           action: "campaign_launched",
-          summary: `${profile.full_name ?? profile.email} launched campaign "${state.campaignName.trim()}" with ${selectedLeads.length} leads (${source})`,
-          metadata: { campaign_id: campaign.id, leads_count: selectedLeads.length, source: state.sourceTab },
+          summary: `${profile.full_name ?? profile.email} launched campaign "${state.campaignName.trim()}" with ${newLeads.length} leads (${source})`,
+          metadata: { campaign_id: campaign.id, leads_count: newLeads.length, source: state.sourceTab },
         });
       }
 
@@ -208,13 +245,18 @@ export function StepLaunch({
       // Increment usage
       await supabase.rpc("increment_leads_used", {
         p_org_id: orgId,
-        p_amount: selectedLeads.length,
+        p_amount: newLeads.length,
       }).then(() => undefined, () => {});
 
       setPhase("complete");
       setLaunchedCampaignId(campaign.id);
       setState((p) => ({ ...p, campaignId: campaign.id }));
-      toast.success("Campaign launched!");
+      if (fnData?.warning) {
+        setLaunchWarning(fnData.warning);
+        toast.warning(fnData.warning, { duration: 10000 });
+      } else {
+        toast.success("Campaign launched!");
+      }
     } catch (e: any) {
       setLaunchError(e?.message || "Failed to launch campaign");
       toast.error(e?.message || "Failed to launch campaign");
@@ -384,6 +426,12 @@ export function StepLaunch({
       {launchError && (
         <div className="rounded-md border border-destructive/40 bg-destructive/5 p-3 text-sm text-destructive">
           {launchError}
+        </div>
+      )}
+
+      {launchWarning && (
+        <div className="rounded-md border border-amber-500/20 bg-amber-500/10 p-3 text-sm text-amber-800 dark:text-amber-400">
+          {launchWarning}
         </div>
       )}
 

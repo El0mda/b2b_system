@@ -1263,6 +1263,8 @@ function ImportTab({
   state: WizardState;
   setState: (updater: (prev: WizardState) => WizardState) => void;
 }) {
+  const { organization } = useAuth();
+  const orgId = organization?.id;
   const [parsed, setParsed] = useState<ParsedFile | null>(null);
   const [mapping, setMapping] = useState<Record<string, LeadFieldKey>>({});
   const [dedupe, setDedupe] = useState(true);
@@ -1355,6 +1357,32 @@ function ImportTab({
       return;
     }
 
+    // Drop rows that already exist in this org's leads — matches the
+    // dedup the standalone /import page does, which this wizard tab
+    // otherwise skips (it only deduped within the file itself).
+    let dbDuplicates = 0;
+    if (dedupe && orgId) {
+      const emails = leads.map((l) => l.email);
+      const existing = new Set<string>();
+      const CHUNK = 500;
+      for (let i = 0; i < emails.length; i += CHUNK) {
+        const slice = emails.slice(i, i + CHUNK);
+        const { data } = await supabase
+          .from("leads")
+          .select("email")
+          .eq("org_id", orgId)
+          .in("email", slice);
+        (data ?? []).forEach((r: any) => r.email && existing.add(r.email.toLowerCase()));
+      }
+      const before = leads.length;
+      leads = leads.filter((l) => !existing.has(l.email));
+      dbDuplicates = before - leads.length;
+    }
+    if (leads.length === 0) {
+      toast.error("Every lead in this file is already in your database");
+      return;
+    }
+
     // Run NeverBounce if enabled
     if (verify) {
       setVerifying(true);
@@ -1390,7 +1418,10 @@ function ImportTab({
       selectedLeadIds: new Set(leads.map((_, i) => String(i))),
     }));
     toast.success(
-      `${leads.length} leads loaded${verify ? " and verified" : ""}`,
+      `${leads.length} leads loaded${verify ? " and verified" : ""}` +
+        (dbDuplicates > 0
+          ? ` (${dbDuplicates} already in your database were skipped)`
+          : ""),
     );
   };
 

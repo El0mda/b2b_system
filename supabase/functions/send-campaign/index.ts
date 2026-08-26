@@ -275,6 +275,7 @@ Deno.serve(async (req) => {
       { method: "GET" },
     );
     let emailAccountId: number | null = null;
+    let senderWarning: string | null = null;
     const senderEmail = (campaign as any).sender_email;
     if (accountsRes.ok) {
       const accounts = await accountsRes.json();
@@ -303,11 +304,11 @@ Deno.serve(async (req) => {
       if (!emailAccRes.ok) {
         const txt = await emailAccRes.text();
         console.error("SmartLead assign email account failed:", txt);
+        senderWarning = `Campaign was created but couldn't assign ${senderEmail} as its sender in SmartLead (${emailAccRes.status}). Connect/reconnect it in SmartLead's Email Accounts, then assign it to this campaign manually.`;
       }
     } else {
-      console.warn(
-        `Could not find SmartLead email account for ${senderEmail} — campaign may have no sender`,
-      );
+      senderWarning = `Campaign was created but ${senderEmail} isn't connected as an email account in SmartLead, so no sender was assigned — the campaign won't actually send. Connect it in SmartLead's Email Accounts, then assign it to this campaign.`;
+      console.warn(senderWarning);
     }
 
     // ── Step E: Update campaign settings ──
@@ -422,6 +423,7 @@ Deno.serve(async (req) => {
       email_account_id: emailAccountId,
       scheduled: true,
       start_response: startTxt,
+      warning: senderWarning,
     });
   } catch (e: any) {
     return json({ error: e?.message ?? String(e) }, 500);
