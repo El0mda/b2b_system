@@ -1,15 +1,27 @@
 // Supabase Edge Function: crm-action
 //
-// Moves a replied lead into a closed pipeline stage (won/lost). For "won",
-// best-effort syncs the outcome to Odoo if the org has it configured —
-// reuses the crm.lead created at reply-time (resend-webhooks) if one
-// exists, creates one otherwise, then calls Odoo's built-in
-// action_set_won on it.
+// Moves a replied lead further through the pipeline:
+//   - "demo_booked": stamps the lead and creates a Tech Team task for it
+//     in the same call, so a demo is never booked without a task to
+//     prepare it
+//   - "meeting_held": just stamps the lead
+//   - "won" / "lost": closes the deal. For "won", best-effort syncs the
+//     outcome to Odoo if the org has it configured — reuses the
+//     crm.lead created at reply-time (resend-webhooks) if one exists,
+//     creates one otherwise, then calls Odoo's built-in action_set_won
+//     on it.
 //
 // Deploy: supabase functions deploy crm-action
 
 // deno-lint-ignore-file no-explicit-any
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
+
+const STAGE_TIMESTAMP_COLUMN: Record<string, string> = {
+  demo_booked: "demo_booked_at",
+  meeting_held: "meeting_held_at",
+  won: "closed_at",
+  lost: "closed_at",
+};
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
@@ -23,10 +35,13 @@ Deno.serve(async (req) => {
     const supabaseUrl = Deno.env.get("SUPABASE_URL");
     if (!supabaseUrl) return json({ error: "Supabase env vars missing" }, 500);
 
-    const { lead_id, stage } = await req.json();
+    const { lead_id, stage, assignee_id, task_title, task_notes } = await req.json();
     if (!lead_id) return json({ error: "lead_id is required" }, 400);
-    if (!["won", "lost"].includes(stage)) {
+    if (!STAGE_TIMESTAMP_COLUMN[stage]) {
       return json({ error: `Unknown stage: ${stage}` }, 400);
+    }
+    if (stage === "demo_booked" && !assignee_id) {
+      return json({ error: "assignee_id is required to book a demo" }, 400);
     }
 
     const userClient = createClient(
@@ -38,7 +53,7 @@ Deno.serve(async (req) => {
     const { data: lead, error: leadError } = await userClient
       .from("leads")
       .select(
-        "id, org_id, campaign_id, first_name, last_name, company, job_title, email, replied_at, synced_to_odoo, odoo_lead_id",
+        "id, org_id, campaign_id, first_name, last_name, full_name, company, job_title, email, replied_at, synced_to_odoo, odoo_lead_id",
       )
       .eq("id", lead_id)
       .maybeSingle();
@@ -46,47 +61,78 @@ Deno.serve(async (req) => {
       return json({ error: leadError?.message ?? "Lead not found or not visible" }, 404);
     }
     if (!(lead as any).replied_at) {
-      return json({ error: "Only replied leads can be marked won/lost" }, 400);
+      return json({ error: "Only replied leads can move further in the pipeline" }, 400);
     }
 
     const now = new Date().toISOString();
     const { error: updateError } = await userClient
       .from("leads")
-      .update({ pipeline_stage: stage, closed_at: now })
+      .update({ pipeline_stage: stage, [STAGE_TIMESTAMP_COLUMN[stage]]: now })
       .eq("id", lead_id);
     if (updateError) return json({ error: updateError.message }, 500);
+
+    const { data: authUser } = await userClient.auth.getUser(
+      auth.replace(/^Bearer\s+/i, ""),
+    );
+    const actorId = authUser?.user?.id ?? null;
+
+    let taskId: string | null = null;
+    if (stage === "demo_booked") {
+      const leadName =
+        (lead as any).full_name ||
+        `${(lead as any).first_name ?? ""} ${(lead as any).last_name ?? ""}`.trim() ||
+        (lead as any).email ||
+        "this lead";
+      const { data: task, error: taskError } = await userClient
+        .from("tasks")
+        .insert({
+          org_id: (lead as any).org_id,
+          lead_id,
+          assigned_to: assignee_id,
+          created_by: actorId,
+          title: task_title || `Prepare demo for ${(lead as any).company || leadName}`,
+          notes: task_notes || null,
+        })
+        .select("id")
+        .single();
+      if (taskError) return json({ error: `Task creation failed: ${taskError.message}` }, 500);
+      taskId = (task as any).id;
+    }
 
     const odooSynced = stage === "won" ? await syncWonToOdoo(userClient, lead as any) : false;
 
     // Best-effort activity log — never fail the request over a logging issue.
     try {
-      const { data: authUser } = await userClient.auth.getUser(
-        auth.replace(/^Bearer\s+/i, ""),
-      );
-      if (authUser?.user) {
+      if (actorId) {
         const { data: actor } = await userClient
           .from("users")
           .select("full_name, email")
-          .eq("id", authUser.user.id)
+          .eq("id", actorId)
           .maybeSingle();
         const actorName = (actor as any)?.full_name ?? (actor as any)?.email ?? "Someone";
         const leadName =
           `${(lead as any).first_name ?? ""} ${(lead as any).last_name ?? ""}`.trim() ||
           (lead as any).email ||
           "a lead";
+        const summaries: Record<string, string> = {
+          demo_booked: `${actorName} booked a demo with ${leadName} and assigned a task`,
+          meeting_held: `${actorName} marked the meeting with ${leadName} as held`,
+          won: `${actorName} marked ${leadName} as won`,
+          lost: `${actorName} marked ${leadName} as lost`,
+        };
         await userClient.from("activity_log").insert({
           org_id: (lead as any).org_id,
-          actor_id: authUser.user.id,
-          action: stage === "won" ? "deal_won" : "deal_lost",
-          summary: `${actorName} marked ${leadName} as ${stage}`,
-          metadata: { lead_id },
+          actor_id: actorId,
+          action: stage === "won" || stage === "lost" ? `deal_${stage}` : stage,
+          summary: summaries[stage],
+          metadata: { lead_id, task_id: taskId },
         });
       }
     } catch (e) {
       console.error("activity log failed:", e);
     }
 
-    return json({ ok: true, odoo_synced: odooSynced });
+    return json({ ok: true, task_id: taskId, odoo_synced: odooSynced });
   } catch (e: any) {
     return json({ error: e?.message ?? String(e) }, 500);
   }
