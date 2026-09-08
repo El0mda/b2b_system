@@ -14,7 +14,6 @@ import NewCampaignPage from "@/pages/campaigns-new";
 import CampaignDetailPage from "@/pages/campaign-detail";
 import LeadsPage from "@/pages/leads";
 import CrmPage from "@/pages/crm";
-import TasksPage from "@/pages/tasks";
 import AnalyticsPage from "@/pages/analytics";
 
 function NotFound() {
@@ -90,14 +89,6 @@ export default function App() {
         element={
           <AuthGate>
             <CrmPage />
-          </AuthGate>
-        }
-      />
-      <Route
-        path="/tasks"
-        element={
-          <AuthGate>
-            <TasksPage />
           </AuthGate>
         }
       />

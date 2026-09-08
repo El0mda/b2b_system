@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Building2, Boxes, Loader2 } from "lucide-react";
+import { Building2, Boxes, Loader2, CheckCircle2, Link2 } from "lucide-react";
 import { toast } from "sonner";
 
 import { useAuth } from "@/hooks/use-auth";
@@ -8,15 +8,9 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/com
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Switch } from "@/components/ui/switch";
+import { Badge } from "@/components/ui/badge";
 
-const ODOO_KEYS = [
-  "odoo_url",
-  "odoo_db",
-  "odoo_user_id",
-  "odoo_api_key",
-  "odoo_auto_create_opportunities",
-] as const;
+const ODOO_KEYS = ["odoo_url", "odoo_db", "odoo_user_id", "odoo_api_key"] as const;
 
 export default function SettingsPage() {
   const { organization } = useAuth();
@@ -46,19 +40,19 @@ export default function SettingsPage() {
         </CardContent>
       </Card>
 
-      <OdooIntegrationCard orgId={organization?.id} />
+      <OdooConnectionCard orgId={organization?.id} />
     </div>
   );
 }
 
-function OdooIntegrationCard({ orgId }: { orgId: string | undefined }) {
+function OdooConnectionCard({ orgId }: { orgId: string | undefined }) {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [url, setUrl] = useState("");
   const [db, setDb] = useState("");
   const [userId, setUserId] = useState("");
   const [apiKey, setApiKey] = useState("");
-  const [autoSync, setAutoSync] = useState(false);
+  const [connected, setConnected] = useState(false);
 
   useEffect(() => {
     if (!orgId) return;
@@ -75,13 +69,17 @@ function OdooIntegrationCard({ orgId }: { orgId: string | undefined }) {
       setDb(values.odoo_db ?? "");
       setUserId(values.odoo_user_id ?? "");
       setApiKey(values.odoo_api_key ?? "");
-      setAutoSync(values.odoo_auto_create_opportunities === "true");
+      setConnected(!!(values.odoo_url && values.odoo_db && values.odoo_user_id && values.odoo_api_key));
       setLoading(false);
     })();
   }, [orgId]);
 
-  const handleSave = async () => {
+  const handleConnect = async () => {
     if (!orgId) return;
+    if (!url.trim() || !db.trim() || !userId.trim() || !apiKey.trim()) {
+      toast.error("Fill in all four fields to connect");
+      return;
+    }
     setSaving(true);
     try {
       const rows = [
@@ -89,19 +87,16 @@ function OdooIntegrationCard({ orgId }: { orgId: string | undefined }) {
         { org_id: orgId, key: "odoo_db", value: db.trim() },
         { org_id: orgId, key: "odoo_user_id", value: userId.trim() },
         { org_id: orgId, key: "odoo_api_key", value: apiKey.trim() },
-        {
-          org_id: orgId,
-          key: "odoo_auto_create_opportunities",
-          value: autoSync ? "true" : "false",
-        },
+        // Filling in the connection is what turns syncing on — no
+        // separate toggle to remember to flip.
+        { org_id: orgId, key: "odoo_auto_create_opportunities", value: "true" },
       ];
-      const { error } = await supabase
-        .from("settings")
-        .upsert(rows, { onConflict: "org_id,key" });
+      const { error } = await supabase.from("settings").upsert(rows, { onConflict: "org_id,key" });
       if (error) throw error;
-      toast.success("Odoo settings saved");
+      setConnected(true);
+      toast.success("Connected to Odoo");
     } catch (e: any) {
-      toast.error(e?.message || "Failed to save Odoo settings");
+      toast.error(e?.message || "Failed to connect to Odoo");
     } finally {
       setSaving(false);
     }
@@ -110,13 +105,26 @@ function OdooIntegrationCard({ orgId }: { orgId: string | undefined }) {
   return (
     <Card>
       <CardHeader>
-        <div className="flex items-center gap-2">
-          <Boxes className="h-5 w-5 text-primary" />
-          <CardTitle>Odoo CRM Integration</CardTitle>
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <Boxes className="h-5 w-5 text-primary" />
+            <CardTitle>Odoo CRM</CardTitle>
+          </div>
+          {!loading && (
+            <Badge variant={connected ? "success" : "secondary"}>
+              {connected ? (
+                <>
+                  <CheckCircle2 className="h-3 w-3" /> Connected
+                </>
+              ) : (
+                "Not connected"
+              )}
+            </Badge>
+          )}
         </div>
         <CardDescription>
-          When enabled, replied leads and deals you mark "Won" in the Pipeline are pushed to
-          Odoo as opportunities.
+          Leads get pushed to Odoo automatically once they click or reply — deal progress from
+          there on is managed inside Odoo.
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
@@ -135,6 +143,9 @@ function OdooIntegrationCard({ orgId }: { orgId: string | undefined }) {
                   onChange={(e) => setUrl(e.target.value)}
                   placeholder="https://mycompany.odoo.com"
                 />
+                <p className="text-xs text-muted-foreground">
+                  The address you use to log into Odoo.
+                </p>
               </div>
               <div className="space-y-1.5">
                 <Label htmlFor="odoo-db">Database</Label>
@@ -144,6 +155,9 @@ function OdooIntegrationCard({ orgId }: { orgId: string | undefined }) {
                   onChange={(e) => setDb(e.target.value)}
                   placeholder="mycompany"
                 />
+                <p className="text-xs text-muted-foreground">
+                  Settings → General Settings → Database in Odoo.
+                </p>
               </div>
               <div className="space-y-1.5">
                 <Label htmlFor="odoo-user-id">User ID</Label>
@@ -153,6 +167,9 @@ function OdooIntegrationCard({ orgId }: { orgId: string | undefined }) {
                   onChange={(e) => setUserId(e.target.value)}
                   placeholder="2"
                 />
+                <p className="text-xs text-muted-foreground">
+                  Settings → Users, open the account → the number in the page URL.
+                </p>
               </div>
               <div className="space-y-1.5">
                 <Label htmlFor="odoo-api-key">API Key</Label>
@@ -163,23 +180,20 @@ function OdooIntegrationCard({ orgId }: { orgId: string | undefined }) {
                   onChange={(e) => setApiKey(e.target.value)}
                   placeholder="••••••••"
                 />
-              </div>
-            </div>
-
-            <div className="flex items-center justify-between rounded-lg border border-border p-3">
-              <div>
-                <p className="text-sm font-medium">Auto-sync to Odoo</p>
                 <p className="text-xs text-muted-foreground">
-                  Push replies and won deals to Odoo automatically.
+                  Your name (top right) → My Profile → Account Security → New API Key.
                 </p>
               </div>
-              <Switch checked={autoSync} onCheckedChange={setAutoSync} />
             </div>
 
             <div className="flex justify-end">
-              <Button onClick={handleSave} disabled={saving}>
-                {saving && <Loader2 className="h-4 w-4 animate-spin" />}
-                Save
+              <Button onClick={handleConnect} disabled={saving}>
+                {saving ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <Link2 className="h-4 w-4" />
+                )}
+                {connected ? "Update Connection" : "Connect to Odoo"}
               </Button>
             </div>
           </>

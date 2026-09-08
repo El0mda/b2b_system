@@ -3,7 +3,7 @@ import { Link, NavLink, useLocation, useNavigate } from "react-router-dom";
 import { Search, Bell, Menu, X, LogOut, Settings, UsersRound } from "lucide-react";
 
 import { useAuth } from "@/hooks/use-auth";
-import { navForRole } from "@/components/layout/nav-items";
+import { NAV } from "@/components/layout/nav-items";
 import { ThemeToggle } from "@/components/layout/theme-toggle";
 import { CommandPalette } from "@/components/layout/command-palette";
 import { DropdownMenu, DropdownItem } from "@/components/ui/dropdown-menu";
@@ -17,7 +17,6 @@ export function AppShell({ children }: { children: ReactNode }) {
   const location = useLocation();
   const navigate = useNavigate();
   const { profile, organization, signOut } = useAuth();
-  const nav = navForRole(profile?.role);
 
   const initials = (profile?.full_name || profile?.email || "U")
     .split(" ")
@@ -57,7 +56,7 @@ export function AppShell({ children }: { children: ReactNode }) {
           </Link>
 
           <nav className="ml-4 hidden items-center gap-1 rounded-full border border-border/70 bg-muted/50 p-1 lg:flex">
-            {nav.map((item) => {
+            {NAV.map((item) => {
               const active = isActive(item.to);
               const Icon = item.icon;
               return (
@@ -173,7 +172,7 @@ export function AppShell({ children }: { children: ReactNode }) {
         {mobileOpen && (
           <nav className="animate-slide-up border-t border-border bg-background px-4 py-3 lg:hidden">
             <div className="grid grid-cols-2 gap-1.5">
-              {nav.map((item) => {
+              {NAV.map((item) => {
                 const active = isActive(item.to);
                 const Icon = item.icon;
                 return (

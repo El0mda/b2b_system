@@ -12,7 +12,6 @@ import {
   Clock,
   MoreHorizontal,
   Activity,
-  Wrench,
 } from "lucide-react";
 
 import { supabase } from "@/lib/supabase";
@@ -77,12 +76,6 @@ function roleBadge(role: string | null) {
       return (
         <Badge variant="info">
           <Shield className="h-3 w-3" /> Admin
-        </Badge>
-      );
-    case "tech":
-      return (
-        <Badge variant="secondary">
-          <Wrench className="h-3 w-3" /> Tech
         </Badge>
       );
     default:
@@ -279,23 +272,18 @@ export default function TeamPage() {
                           >
                             {(close) => (
                               <>
-                                {(["admin", "member", "tech"] as const)
-                                  .filter((r) => r !== m.role)
-                                  .map((r) => (
-                                    <DropdownItem
-                                      key={r}
-                                      onSelect={() => {
-                                        close();
-                                        updateRole.mutate({
-                                          id: m.id,
-                                          email: m.email ?? "",
-                                          role: r,
-                                        });
-                                      }}
-                                    >
-                                      Set as {r === "admin" ? "Admin" : r === "tech" ? "Tech" : "Member"}
-                                    </DropdownItem>
-                                  ))}
+                                <DropdownItem
+                                  onSelect={() => {
+                                    close();
+                                    updateRole.mutate({
+                                      id: m.id,
+                                      email: m.email ?? "",
+                                      role: m.role === "admin" ? "member" : "admin",
+                                    });
+                                  }}
+                                >
+                                  {m.role === "admin" ? "Demote to Member" : "Promote to Admin"}
+                                </DropdownItem>
                                 <DropdownItem
                                   destructive
                                   onSelect={() => {
@@ -527,7 +515,6 @@ function InviteDialog({
           >
             <option value="admin">Admin — manage everything except billing</option>
             <option value="member">Member — campaigns and leads only</option>
-            <option value="tech">Tech — assigned tasks only</option>
           </Select>
         </div>
       </div>
