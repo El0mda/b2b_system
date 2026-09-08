@@ -7,7 +7,7 @@
 //   - "meeting_held": just stamps the lead
 //   - "won" / "lost": closes the deal. For "won", best-effort syncs the
 //     outcome to Odoo if the org has it configured — reuses the
-//     crm.lead created at reply-time (resend-webhooks) if one exists,
+//     crm.lead created at reply-time (smartlead-webhooks) if one exists,
 //     creates one otherwise, then calls Odoo's built-in action_set_won
 //     on it.
 //

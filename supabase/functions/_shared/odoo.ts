@@ -1,8 +1,6 @@
-// Shared Odoo push/upgrade helper.
-//
-// A campaign's delivery events can land at either resend-webhooks or
-// smartlead-webhooks depending on how it was sent, so both call this
-// instead of each keeping their own copy of the JSON-RPC logic.
+// Shared Odoo helpers. pushLeadToOdoo is called from smartlead-webhooks
+// (all campaigns are sent through SmartLead); getOdooSettings/odooCall
+// are also reused directly by odoo-sync for its read-only stage poll.
 //
 // Push happens on two signals:
 //   - click (weaker): creates a plain Odoo lead if one doesn't exist yet
