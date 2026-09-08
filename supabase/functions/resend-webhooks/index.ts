@@ -15,6 +15,7 @@
 
 // deno-lint-ignore-file no-explicit-any
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
+import { pushLeadToOdoo } from "../_shared/odoo.ts";
 
 const RESEND_API = "https://api.resend.com";
 
@@ -121,6 +122,33 @@ async function handleDeliveryEvent(body: any, sb: any): Promise<Response> {
     await sb.from("leads").update(update).eq("id", leadId);
   }
 
+  // First click is a weak-but-real engagement signal — push to Odoo as a
+  // plain lead (not yet an opportunity; that upgrade happens on reply).
+  if (eventType === "email.clicked") {
+    try {
+      const { data: lead } = await sb
+        .from("leads")
+        .select(
+          "id, org_id, first_name, last_name, company, job_title, email, synced_to_odoo, odoo_lead_id",
+        )
+        .eq("id", leadId)
+        .maybeSingle();
+      if (lead && !lead.synced_to_odoo) {
+        const { data: campaign } = await sb
+          .from("campaigns")
+          .select("name")
+          .eq("id", campaignId)
+          .maybeSingle();
+        await pushLeadToOdoo(sb, lead, {
+          asOpportunity: false,
+          campaignName: campaign?.name,
+        });
+      }
+    } catch (e) {
+      console.error("Odoo push-on-click failed:", e);
+    }
+  }
+
   // Log the event
   await sb.from("webhook_logs").insert({
     org_id: orgId,
@@ -208,104 +236,31 @@ async function handleInboundReply(body: any, sb: any): Promise<Response> {
     }
   }
 
-  // 3. Odoo auto-sync
+  // 3. Odoo auto-sync — upgrade to (or create as) an opportunity, since a
+  // reply is a much stronger signal than the click that may have already
+  // pushed this lead over as a plain lead.
   try {
-    const { data: odooUrl } = await sb
-      .from("settings")
-      .select("value")
-      .eq("org_id", lead.org_id)
-      .eq("key", "odoo_url")
+    const { data: odooFields } = await sb
+      .from("leads")
+      .select("synced_to_odoo, odoo_lead_id")
+      .eq("id", lead.id)
       .maybeSingle();
-
-    const { data: odooDb } = await sb
-      .from("settings")
-      .select("value")
-      .eq("org_id", lead.org_id)
-      .eq("key", "odoo_db")
+    const { data: campaign } = await sb
+      .from("campaigns")
+      .select("name")
+      .eq("id", lead.campaign_id)
       .maybeSingle();
-
-    const { data: odooUserId } = await sb
-      .from("settings")
-      .select("value")
-      .eq("org_id", lead.org_id)
-      .eq("key", "odoo_user_id")
-      .maybeSingle();
-
-    const { data: odooKey } = await sb
-      .from("settings")
-      .select("value")
-      .eq("org_id", lead.org_id)
-      .eq("key", "odoo_api_key")
-      .maybeSingle();
-
-    const { data: odooAutoCreate } = await sb
-      .from("settings")
-      .select("value")
-      .eq("org_id", lead.org_id)
-      .eq("key", "odoo_auto_create_opportunities")
-      .maybeSingle();
-
-    const shouldSync = odooAutoCreate?.value === "true";
-    const url = (odooUrl as any)?.value;
-    const db = (odooDb as any)?.value;
-    const userId = Number((odooUserId as any)?.value);
-    const apiKey = (odooKey as any)?.value;
-
-    if (shouldSync && url && db && userId && apiKey) {
-      // Get campaign name
-      const { data: campaign } = await sb
-        .from("campaigns")
-        .select("name")
-        .eq("id", lead.campaign_id)
-        .maybeSingle();
-
-      const campaignName = campaign?.name ?? "Campaign";
-      const firstName = lead.first_name ?? "";
-      const lastName = lead.last_name ?? "";
-
-      const odooPayload = {
-        jsonrpc: "2.0",
-        method: "call",
-        params: {
-          service: "object",
-          method: "execute_kw",
-          args: [
-            db,
-            userId,
-            apiKey,
-            "crm.lead",
-            "create",
-            [{
-              name: `Reply from ${firstName} ${lastName} — ${campaignName}`.trim(),
-              contact_name: `${firstName} ${lastName}`.trim(),
-              email_from: fromEmail,
-              partner_name: lead.company ?? "",
-              function: lead.job_title ?? "",
-              description: `Campaign: ${campaignName}\nReply: ${now}\n\n${text.slice(0, 2000)}`,
-              type: "opportunity",
-            }],
-          ],
-        },
-      };
-
-      const odooRes = await fetch(url.replace(/\/$/, "") + "/jsonrpc", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(odooPayload),
-      });
-
-      if (odooRes.ok) {
-        const odooJson: any = await odooRes.json();
-        if (odooJson?.result) {
-          await sb.from("leads").update({
-            synced_to_odoo: true,
-            odoo_lead_id: String(odooJson.result),
-          }).eq("id", lead.id);
-        }
-      }
-    }
-  } catch {
-    // Odoo sync is best-effort
+    await pushLeadToOdoo(
+      sb,
+      { ...lead, email: fromEmail, ...(odooFields ?? {}) },
+      {
+        asOpportunity: true,
+        campaignName: campaign?.name,
+        note: `Campaign: ${campaign?.name ?? "Campaign"}\nReply: ${now}\n\n${text.slice(0, 2000)}`,
+      },
+    );
+  } catch (e) {
+    console.error("Odoo sync-on-reply failed:", e);
   }
 
   // 4. Log to webhook_logs

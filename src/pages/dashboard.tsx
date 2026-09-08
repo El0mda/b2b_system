@@ -20,6 +20,7 @@ import {
   Eye,
   MessageSquare,
   ArrowUpRight,
+  Boxes,
 } from "lucide-react";
 import { format, subDays } from "date-fns";
 
@@ -156,6 +157,26 @@ export default function DashboardPage() {
     },
   });
 
+  const { data: odooStages } = useQuery({
+    queryKey: ["odoo-stages", orgId],
+    enabled: !!orgId,
+    queryFn: async () => {
+      const { data } = await supabase
+        .from("leads")
+        .select("odoo_stage")
+        .eq("org_id", orgId!)
+        .eq("synced_to_odoo", true);
+      const counts: Record<string, number> = {};
+      (data ?? []).forEach((r) => {
+        const k = r.odoo_stage ?? "Pending sync";
+        counts[k] = (counts[k] ?? 0) + 1;
+      });
+      return Object.entries(counts)
+        .map(([stage, count]) => ({ stage, count }))
+        .sort((a, b) => b.count - a.count);
+    },
+  });
+
   // Placeholder series — real impl aggregates from webhook_logs / lead timestamps.
   const activitySeries = Array.from({ length: 30 }).map((_, i) => {
     const d = subDays(new Date(), 29 - i);
@@ -267,6 +288,37 @@ export default function DashboardPage() {
           </CardContent>
         </Card>
       </div>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Odoo Pipeline</CardTitle>
+          <p className="text-sm text-muted-foreground">
+            Deal stage for every lead pushed to Odoo, checked twice a day.
+          </p>
+        </CardHeader>
+        <CardContent>
+          {odooStages && odooStages.length > 0 ? (
+            <div className="flex flex-wrap gap-3">
+              {odooStages.map(({ stage, count }) => (
+                <div
+                  key={stage}
+                  className="flex items-center gap-2 rounded-lg border border-border bg-muted/20 px-4 py-2.5"
+                >
+                  <Boxes className="h-4 w-4 text-muted-foreground" />
+                  <span className="text-sm font-medium">{stage}</span>
+                  <span className="rounded-full bg-muted px-2 py-0.5 text-xs font-semibold">
+                    {count}
+                  </span>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <p className="text-sm text-muted-foreground">
+              No leads synced to Odoo yet — pushed automatically once a lead clicks or replies.
+            </p>
+          )}
+        </CardContent>
+      </Card>
 
       <Card>
         <CardHeader className="flex flex-row items-center justify-between">

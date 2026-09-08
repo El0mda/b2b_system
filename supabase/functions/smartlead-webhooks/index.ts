@@ -32,6 +32,7 @@
 
 // deno-lint-ignore-file no-explicit-any
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
+import { pushLeadToOdoo } from "../_shared/odoo.ts";
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
@@ -143,6 +144,32 @@ Deno.serve(async (req) => {
     if (Object.keys(updates).length > 0) {
       const { error } = await sb.from("leads").update(updates).eq("id", leadRowId);
       if (error) return json({ error: error.message }, 500);
+    }
+
+    // Push to Odoo: first click creates a plain lead there, a reply
+    // creates (or upgrades an already-clicked lead to) an opportunity.
+    if (event === "EMAIL_CLICKED" || event === "EMAIL_REPLIED") {
+      try {
+        const { data: leadForOdoo } = await sb
+          .from("leads")
+          .select(
+            "id, org_id, first_name, last_name, company, job_title, email, synced_to_odoo, odoo_lead_id",
+          )
+          .eq("id", leadRowId)
+          .maybeSingle();
+        if (leadForOdoo && (event === "EMAIL_REPLIED" || !leadForOdoo.synced_to_odoo)) {
+          await pushLeadToOdoo(sb, leadForOdoo, {
+            asOpportunity: event === "EMAIL_REPLIED",
+            campaignName: campaign.name,
+            note:
+              event === "EMAIL_REPLIED"
+                ? `Campaign: ${campaign.name}\nReply: ${now}\n\n${(body.reply?.body ?? "").slice(0, 2000)}`
+                : undefined,
+          });
+        }
+      } catch (e) {
+        console.error("Odoo push failed:", e);
+      }
     }
 
     return json({ ok: true, matched: true, lead_matched: true });
