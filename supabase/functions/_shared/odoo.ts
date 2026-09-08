@@ -53,7 +53,12 @@ export async function getOdooSettings(sb: any, orgId: string): Promise<OdooSetti
   return { url, db, userId, apiKey };
 }
 
-export function odooCall(settings: OdooSettings, method: string, args: any[]) {
+export function odooCall(
+  settings: OdooSettings,
+  method: string,
+  args: any[],
+  kwargs?: Record<string, any>,
+) {
   return fetch(settings.url.replace(/\/$/, "") + "/jsonrpc", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -63,7 +68,15 @@ export function odooCall(settings: OdooSettings, method: string, args: any[]) {
       params: {
         service: "object",
         method: "execute_kw",
-        args: [settings.db, settings.userId, settings.apiKey, "crm.lead", method, args],
+        args: [
+          settings.db,
+          settings.userId,
+          settings.apiKey,
+          "crm.lead",
+          method,
+          args,
+          ...(kwargs ? [kwargs] : []),
+        ],
       },
     }),
   });
@@ -72,7 +85,7 @@ export function odooCall(settings: OdooSettings, method: string, args: any[]) {
 export async function pushLeadToOdoo(
   sb: any,
   lead: OdooLeadInput,
-  opts: { asOpportunity: boolean; campaignName?: string; note?: string },
+  opts: { asOpportunity: boolean; campaignName?: string; note?: string; odooUserId?: string | null },
 ): Promise<boolean> {
   try {
     const settings = await getOdooSettings(sb, lead.org_id);
@@ -80,6 +93,7 @@ export async function pushLeadToOdoo(
 
     const fullName = `${lead.first_name ?? ""} ${lead.last_name ?? ""}`.trim() || lead.email;
     const campaignName = opts.campaignName ?? "Campaign";
+    const assigneeId = opts.odooUserId ? Number(opts.odooUserId) : null;
 
     if (!lead.odoo_lead_id) {
       const createRes = await odooCall(settings, "create", [
@@ -91,6 +105,7 @@ export async function pushLeadToOdoo(
           function: lead.job_title ?? "",
           description: opts.note ?? `Campaign: ${campaignName}`,
           type: opts.asOpportunity ? "opportunity" : "lead",
+          ...(assigneeId && !Number.isNaN(assigneeId) ? { user_id: assigneeId } : {}),
         },
       ]);
       if (!createRes.ok) return false;

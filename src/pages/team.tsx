@@ -47,6 +47,7 @@ interface Member {
   full_name: string | null;
   role: string | null;
   created_at: string | null;
+  odoo_user_id: string | null;
 }
 
 interface Invitation {
@@ -102,7 +103,7 @@ export default function TeamPage() {
     queryFn: async () => {
       const { data, error } = await supabase
         .from("users")
-        .select("id, email, full_name, role, created_at")
+        .select("id, email, full_name, role, created_at, odoo_user_id")
         .eq("org_id", orgId!)
         .order("created_at", { ascending: true });
       if (error) throw error;
@@ -160,6 +161,21 @@ export default function TeamPage() {
       }
     },
     onError: (e: any) => toast.error(e?.message || "Failed to update role"),
+  });
+
+  const updateOdooUserId = useMutation({
+    mutationFn: async ({ id, odooUserId }: { id: string; odooUserId: string }) => {
+      const { error } = await supabase
+        .from("users")
+        .update({ odoo_user_id: odooUserId.trim() || null })
+        .eq("id", id);
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["team-members", orgId] });
+      toast.success("Odoo User ID saved");
+    },
+    onError: (e: any) => toast.error(e?.message || "Failed to save Odoo User ID"),
   });
 
   const removeMember = useMutation({
@@ -233,6 +249,7 @@ export default function TeamPage() {
                   <TableHead>Name</TableHead>
                   <TableHead>Email</TableHead>
                   <TableHead>Role</TableHead>
+                  <TableHead>Odoo User ID</TableHead>
                   <TableHead>Joined</TableHead>
                   <TableHead className="text-right">Actions</TableHead>
                 </TableRow>
@@ -252,6 +269,20 @@ export default function TeamPage() {
                       </TableCell>
                       <TableCell className="text-muted-foreground">{m.email}</TableCell>
                       <TableCell>{roleBadge(m.role)}</TableCell>
+                      <TableCell>
+                        {canManage ? (
+                          <OdooUserIdCell
+                            value={m.odoo_user_id}
+                            onSave={(odooUserId) =>
+                              updateOdooUserId.mutate({ id: m.id, odooUserId })
+                            }
+                          />
+                        ) : (
+                          <span className="text-sm text-muted-foreground">
+                            {m.odoo_user_id ?? "—"}
+                          </span>
+                        )}
+                      </TableCell>
                       <TableCell className="text-sm text-muted-foreground">
                         {m.created_at
                           ? new Date(m.created_at).toLocaleDateString(undefined, {
@@ -529,5 +560,26 @@ function InviteDialog({
         </Button>
       </DialogFooter>
     </Dialog>
+  );
+}
+
+function OdooUserIdCell({
+  value,
+  onSave,
+}: {
+  value: string | null;
+  onSave: (value: string) => void;
+}) {
+  const [draft, setDraft] = useState(value ?? "");
+  return (
+    <Input
+      value={draft}
+      onChange={(e) => setDraft(e.target.value)}
+      onBlur={() => {
+        if (draft !== (value ?? "")) onSave(draft);
+      }}
+      placeholder="e.g. 30"
+      className="h-8 w-24 text-sm"
+    />
   );
 }

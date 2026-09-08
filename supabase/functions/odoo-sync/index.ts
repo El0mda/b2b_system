@@ -58,7 +58,14 @@ Deno.serve(async (req) => {
       const odooIds = Array.from(idMap.keys());
       if (odooIds.length === 0) continue;
 
-      const res = await odooCall(settings, "read", [odooIds, ["stage_id"]]);
+      // active_test: false is required or archived (lost) opportunities
+      // are silently dropped from the result instead of being returned.
+      const res = await odooCall(
+        settings,
+        "read",
+        [odooIds, ["stage_id", "probability", "active", "expected_revenue"]],
+        { context: { active_test: false } },
+      );
       if (!res.ok) continue;
       const resJson: any = await res.json();
       const records: any[] = resJson?.result ?? [];
@@ -69,9 +76,19 @@ Deno.serve(async (req) => {
         if (!localLeadId) continue;
         // Many2one fields come back as [id, "Display Name"].
         const stageName = Array.isArray(record.stage_id) ? record.stage_id[1] : null;
+        // Odoo's own convention: archived (active=false) means lost;
+        // still-active with probability at 100 means won; anything else
+        // is still an open deal.
+        const odooWon =
+          record.active === false ? false : record.probability === 100 ? true : null;
         await sb
           .from("leads")
-          .update({ odoo_stage: stageName, odoo_stage_synced_at: now })
+          .update({
+            odoo_stage: stageName,
+            odoo_stage_synced_at: now,
+            odoo_won: odooWon,
+            odoo_expected_revenue: record.expected_revenue ?? null,
+          })
           .eq("id", localLeadId);
         leadsSynced++;
       }

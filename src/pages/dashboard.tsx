@@ -21,6 +21,8 @@ import {
   MessageSquare,
   ArrowUpRight,
   Boxes,
+  Trophy,
+  XCircle,
 } from "lucide-react";
 import { format, subDays } from "date-fns";
 
@@ -29,6 +31,14 @@ import { useAuth } from "@/hooks/use-auth";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
 import { cn } from "@/lib/utils";
 
 const STATUS_BADGE: Record<string, { className: string; pulse?: boolean }> = {
@@ -70,8 +80,9 @@ function StatCard({ icon: Icon, label, value, hint, color }: StatCardProps) {
 }
 
 export default function DashboardPage() {
-  const { organization } = useAuth();
+  const { organization, profile } = useAuth();
   const orgId = organization?.id;
+  const isAdmin = profile?.role === "owner" || profile?.role === "admin";
 
   const { data: stats } = useQuery({
     queryKey: ["dashboard-stats", orgId],
@@ -174,6 +185,87 @@ export default function DashboardPage() {
       return Object.entries(counts)
         .map(([stage, count]) => ({ stage, count }))
         .sort((a, b) => b.count - a.count);
+    },
+  });
+
+  const { data: salesPerformance } = useQuery({
+    queryKey: ["salesperson-performance", orgId],
+    enabled: !!orgId && isAdmin,
+    queryFn: async () => {
+      const [{ data: campaigns }, { data: users }] = await Promise.all([
+        supabase
+          .from("campaigns")
+          .select("id, created_by")
+          .eq("org_id", orgId!),
+        supabase
+          .from("users")
+          .select("id, full_name, email")
+          .eq("org_id", orgId!),
+      ]);
+      const campaignIds = (campaigns ?? []).map((c) => c.id);
+      const { data: leads } = campaignIds.length
+        ? await supabase
+            .from("leads")
+            .select("campaign_id, email_delivered, email_opened, replied_at, odoo_won, odoo_expected_revenue")
+            .in("campaign_id", campaignIds)
+        : { data: [] as any[] };
+
+      const creatorByCampaign = new Map(
+        (campaigns ?? []).map((c) => [c.id, c.created_by as string | null]),
+      );
+      const nameByUser = new Map(
+        (users ?? []).map((u) => [u.id, u.full_name ?? u.email ?? "Unknown"]),
+      );
+
+      interface Row {
+        userId: string;
+        name: string;
+        campaigns: number;
+        leads: number;
+        delivered: number;
+        opened: number;
+        replied: number;
+        won: number;
+        lost: number;
+        revenue: number;
+      }
+      const rows = new Map<string, Row>();
+      const getRow = (userId: string) => {
+        if (!rows.has(userId)) {
+          rows.set(userId, {
+            userId,
+            name: nameByUser.get(userId) ?? "Unassigned",
+            campaigns: 0,
+            leads: 0,
+            delivered: 0,
+            opened: 0,
+            replied: 0,
+            won: 0,
+            lost: 0,
+            revenue: 0,
+          });
+        }
+        return rows.get(userId)!;
+      };
+
+      (campaigns ?? []).forEach((c) => {
+        if (!c.created_by) return;
+        getRow(c.created_by).campaigns++;
+      });
+      (leads ?? []).forEach((l: any) => {
+        const userId = creatorByCampaign.get(l.campaign_id);
+        if (!userId) return;
+        const row = getRow(userId);
+        row.leads++;
+        if (l.email_delivered) row.delivered++;
+        if (l.email_opened) row.opened++;
+        if (l.replied_at) row.replied++;
+        if (l.odoo_won === true) row.won++;
+        if (l.odoo_won === false) row.lost++;
+        if (l.odoo_expected_revenue) row.revenue += Number(l.odoo_expected_revenue);
+      });
+
+      return Array.from(rows.values()).sort((a, b) => b.campaigns - a.campaigns);
     },
   });
 
@@ -288,6 +380,69 @@ export default function DashboardPage() {
           </CardContent>
         </Card>
       </div>
+
+      {isAdmin && (
+        <Card>
+          <CardHeader>
+            <CardTitle>Salesperson Performance</CardTitle>
+            <p className="text-sm text-muted-foreground">
+              Campaigns, engagement, and Odoo deal outcomes per team member.
+            </p>
+          </CardHeader>
+          <CardContent className="p-0">
+            {salesPerformance && salesPerformance.length > 0 ? (
+              <div className="overflow-x-auto">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Salesperson</TableHead>
+                      <TableHead>Campaigns</TableHead>
+                      <TableHead>Leads</TableHead>
+                      <TableHead>Delivered</TableHead>
+                      <TableHead>Opened</TableHead>
+                      <TableHead>Replied</TableHead>
+                      <TableHead>Won</TableHead>
+                      <TableHead>Lost</TableHead>
+                      <TableHead>Revenue (Odoo)</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {salesPerformance.map((row) => (
+                      <TableRow key={row.userId}>
+                        <TableCell className="font-medium">{row.name}</TableCell>
+                        <TableCell>{row.campaigns}</TableCell>
+                        <TableCell>{row.leads}</TableCell>
+                        <TableCell>{row.delivered}</TableCell>
+                        <TableCell>{row.opened}</TableCell>
+                        <TableCell>{row.replied}</TableCell>
+                        <TableCell>
+                          <span className="inline-flex items-center gap-1 text-emerald-600 dark:text-emerald-400">
+                            <Trophy className="h-3.5 w-3.5" /> {row.won}
+                          </span>
+                        </TableCell>
+                        <TableCell>
+                          <span className="inline-flex items-center gap-1 text-muted-foreground">
+                            <XCircle className="h-3.5 w-3.5" /> {row.lost}
+                          </span>
+                        </TableCell>
+                        <TableCell>
+                          {row.revenue > 0
+                            ? `$${row.revenue.toLocaleString(undefined, { maximumFractionDigits: 0 })}`
+                            : "—"}
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </div>
+            ) : (
+              <p className="p-6 text-sm text-muted-foreground">
+                No campaigns launched yet.
+              </p>
+            )}
+          </CardContent>
+        </Card>
+      )}
 
       <Card>
         <CardHeader>

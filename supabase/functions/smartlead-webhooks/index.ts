@@ -60,7 +60,7 @@ Deno.serve(async (req) => {
     const { data: campaign } = slCampaignId
       ? await sb
           .from("campaigns")
-          .select("id, org_id, name")
+          .select("id, org_id, name, created_by")
           .eq("smartlead_campaign_id", slCampaignId)
           .maybeSingle()
       : { data: null };
@@ -158,9 +158,19 @@ Deno.serve(async (req) => {
           .eq("id", leadRowId)
           .maybeSingle();
         if (leadForOdoo && (event === "EMAIL_REPLIED" || !leadForOdoo.synced_to_odoo)) {
+          let odooUserId: string | null = null;
+          if (campaign.created_by) {
+            const { data: creator } = await sb
+              .from("users")
+              .select("odoo_user_id")
+              .eq("id", campaign.created_by)
+              .maybeSingle();
+            odooUserId = creator?.odoo_user_id ?? null;
+          }
           await pushLeadToOdoo(sb, leadForOdoo, {
             asOpportunity: event === "EMAIL_REPLIED",
             campaignName: campaign.name,
+            odooUserId,
             note:
               event === "EMAIL_REPLIED"
                 ? `Campaign: ${campaign.name}\nReply: ${now}\n\n${(body.reply?.body ?? "").slice(0, 2000)}`
