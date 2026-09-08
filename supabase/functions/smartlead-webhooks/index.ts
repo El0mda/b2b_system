@@ -146,9 +146,12 @@ Deno.serve(async (req) => {
       if (error) return json({ error: error.message }, 500);
     }
 
-    // Push to Odoo: first click creates a plain lead there, a reply
-    // creates (or upgrades an already-clicked lead to) an opportunity.
-    if (event === "EMAIL_CLICKED" || event === "EMAIL_REPLIED") {
+    // Push to Odoo: earliest signal creates a plain lead there, a reply
+    // creates (or upgrades an already-pushed lead to) an opportunity.
+    // TEMPORARY: also pushing on EMAIL_SENT (delivery) instead of waiting
+    // for a real click, so testing doesn't need someone to actually click
+    // a link — revert to CLICKED/REPLIED only once real traffic is ready.
+    if (event === "EMAIL_SENT" || event === "EMAIL_CLICKED" || event === "EMAIL_REPLIED") {
       try {
         const { data: leadForOdoo } = await sb
           .from("leads")
