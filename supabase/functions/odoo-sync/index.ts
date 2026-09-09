@@ -66,8 +66,20 @@ Deno.serve(async (req) => {
         [odooIds, ["stage_id", "probability", "active", "expected_revenue"]],
         { context: { active_test: false } },
       );
-      if (!res.ok) continue;
-      const resJson: any = await res.json();
+      const rawBody = await res.text();
+      let resJson: any;
+      try {
+        resJson = JSON.parse(rawBody);
+      } catch {
+        console.error(
+          `Odoo read did not return JSON (HTTP ${res.status}) for org ${orgId} — check the Odoo URL points at the domain root, not /odoo. Body: ${rawBody.slice(0, 200)}`,
+        );
+        continue;
+      }
+      if (resJson?.error) {
+        console.error(`Odoo read error for org ${orgId}: ${JSON.stringify(resJson.error).slice(0, 400)}`);
+        continue;
+      }
       const records: any[] = resJson?.result ?? [];
 
       const now = new Date().toISOString();

@@ -53,13 +53,22 @@ export async function getOdooSettings(sb: any, orgId: string): Promise<OdooSetti
   return { url, db, userId, apiKey };
 }
 
+// Odoo 17+ serves its web client under /odoo (and older versions under
+// /web), so that's what people copy out of the browser — but JSON-RPC
+// always lives at the domain root. Posting to /odoo/jsonrpc returns the
+// web client's HTML with a 200, which then blows up as a JSON parse
+// error rather than anything that looks like a misconfiguration.
+export function odooBaseUrl(url: string): string {
+  return url.replace(/\/+$/, "").replace(/\/(odoo|web)$/i, "");
+}
+
 export function odooCall(
   settings: OdooSettings,
   method: string,
   args: any[],
   kwargs?: Record<string, any>,
 ) {
-  return fetch(settings.url.replace(/\/$/, "") + "/jsonrpc", {
+  return fetch(odooBaseUrl(settings.url) + "/jsonrpc", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
@@ -80,6 +89,30 @@ export function odooCall(
       },
     }),
   });
+}
+
+// Odoo answers 200 with an HTML page for a wrong endpoint, and 200 with
+// a JSON `error` object for auth/permission problems — neither of which
+// `res.ok` catches. Surfacing both here is the difference between a
+// diagnosable log line and a push that silently does nothing.
+async function parseOdooResponse(res: Response, label: string): Promise<any | null> {
+  const text = await res.text();
+  let parsed: any;
+  try {
+    parsed = JSON.parse(text);
+  } catch {
+    console.error(
+      `Odoo ${label} did not return JSON (HTTP ${res.status}) — check the Odoo URL points at the domain root, not /odoo. Body: ${text.slice(0, 200)}`,
+    );
+    return null;
+  }
+  if (parsed?.error) {
+    console.error(
+      `Odoo ${label} error: ${JSON.stringify(parsed.error).slice(0, 400)}`,
+    );
+    return null;
+  }
+  return parsed;
 }
 
 export async function pushLeadToOdoo(
@@ -108,8 +141,7 @@ export async function pushLeadToOdoo(
           ...(assigneeId && !Number.isNaN(assigneeId) ? { user_id: assigneeId } : {}),
         },
       ]);
-      if (!createRes.ok) return false;
-      const createJson: any = await createRes.json();
+      const createJson = await parseOdooResponse(createRes, "create");
       if (!createJson?.result) return false;
       await sb
         .from("leads")
@@ -125,10 +157,11 @@ export async function pushLeadToOdoo(
         [Number(lead.odoo_lead_id)],
         { type: "opportunity", ...(opts.note ? { description: opts.note } : {}) },
       ]);
-      return writeRes.ok;
+      return !!(await parseOdooResponse(writeRes, "write"));
     }
     return true;
-  } catch {
+  } catch (e) {
+    console.error("Odoo push failed:", e);
     return false;
   }
 }

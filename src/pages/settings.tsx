@@ -144,7 +144,7 @@ function OdooConnectionCard({ orgId }: { orgId: string | undefined }) {
                   placeholder="https://mycompany.odoo.com"
                 />
                 <p className="text-xs text-muted-foreground">
-                  The address you use to log into Odoo.
+                  Just the domain — any trailing /odoo or /web is ignored.
                 </p>
               </div>
               <div className="space-y-1.5">
