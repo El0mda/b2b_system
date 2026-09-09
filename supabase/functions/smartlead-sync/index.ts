@@ -21,6 +21,7 @@
 
 // deno-lint-ignore-file no-explicit-any
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
+import { pushLeadToOdoo } from "../_shared/odoo.ts";
 
 const SMARTLEAD_API = "https://server.smartlead.ai/api/v1";
 
@@ -53,11 +54,29 @@ function stripReplyHtml(html: string): string {
     .trim();
 }
 
+interface SyncableLead {
+  id: string;
+  smartlead_lead_id: string;
+  org_id: string;
+  first_name: string | null;
+  last_name: string | null;
+  company: string | null;
+  job_title: string | null;
+  email: string;
+  synced_to_odoo: boolean | null;
+  odoo_lead_id: string | null;
+  email_delivered: boolean | null;
+  email_clicked: boolean | null;
+  replied_at: string | null;
+}
+
 async function syncLead(
   sb: ReturnType<typeof createClient>,
   smartleadKey: string,
   slCampaignId: string,
-  lead: { id: string; smartlead_lead_id: string },
+  lead: SyncableLead,
+  campaignName: string,
+  odooUserId: string | null,
 ): Promise<void> {
   const res = await smartleadFetch(
     `/campaigns/${slCampaignId}/leads/${lead.smartlead_lead_id}/message-history`,
@@ -91,6 +110,42 @@ async function syncLead(
   if (Object.keys(updates).length > 0) {
     await sb.from("leads").update(updates).eq("id", lead.id);
   }
+
+  // Push to Odoo — mirrors smartlead-webhooks' push logic. SmartLead's
+  // webhooks don't reliably fire in this account (see the file header),
+  // so this polling path is often the one that actually observes
+  // delivery/click/reply first — it needs the same push, not just the
+  // webhook handler, or leads sent via a campaign whose webhook events
+  // never arrive would never reach Odoo at all.
+  // TEMPORARY: also pushing on delivered (not just clicked/replied), for
+  // faster testing — revert to clicked/replied only once real traffic
+  // is ready (see the matching note in smartlead-webhooks).
+  const finalDelivered = Boolean(updates.email_delivered ?? lead.email_delivered);
+  const finalClicked = Boolean(updates.email_clicked ?? lead.email_clicked);
+  const finalRepliedAt = (updates.replied_at ?? lead.replied_at) as string | null;
+  const isReplied = !!finalRepliedAt;
+  // Unlike the webhook path, this runs every 5 minutes against the same
+  // leads forever — so each push has to be a one-shot transition, or a
+  // replied lead would re-hit Odoo on every single poll.
+  const newlyReplied = !lead.replied_at && !!updates.replied_at;
+  const firstPush = !lead.synced_to_odoo && (finalDelivered || finalClicked || isReplied);
+
+  if (firstPush || newlyReplied) {
+    try {
+      await pushLeadToOdoo(sb, lead, {
+        asOpportunity: isReplied,
+        campaignName,
+        odooUserId,
+        note: isReplied
+          ? `Campaign: ${campaignName}\nReply: ${finalRepliedAt}\n\n${String(
+              updates.reply_text ?? "",
+            ).slice(0, 2000)}`
+          : undefined,
+      });
+    } catch (e) {
+      console.error("Odoo push failed:", e);
+    }
+  }
 }
 
 Deno.serve(async (req) => {
@@ -112,7 +167,7 @@ Deno.serve(async (req) => {
 
     let campaignsQuery = sb
       .from("campaigns")
-      .select("id, smartlead_campaign_id")
+      .select("id, smartlead_campaign_id, name, created_by")
       .not("smartlead_campaign_id", "is", null);
     if (campaignId) campaignsQuery = campaignsQuery.eq("id", campaignId);
     const { data: campaigns, error: campaignsError } = await campaignsQuery;
@@ -122,11 +177,34 @@ Deno.serve(async (req) => {
     for (const campaign of campaigns ?? []) {
       const { data: leads } = await sb
         .from("leads")
-        .select("id, smartlead_lead_id")
+        .select(
+          "id, smartlead_lead_id, org_id, first_name, last_name, company, job_title, email, synced_to_odoo, odoo_lead_id, email_delivered, email_clicked, replied_at",
+        )
         .eq("campaign_id", (campaign as any).id)
         .not("smartlead_lead_id", "is", null);
-      for (const lead of (leads ?? []) as any[]) {
-        await syncLead(sb, smartleadKey, (campaign as any).smartlead_campaign_id, lead);
+      if (!leads || leads.length === 0) continue;
+
+      // Resolved once per campaign rather than per lead — every lead in a
+      // campaign is attributed to whoever created that campaign.
+      let odooUserId: string | null = null;
+      if ((campaign as any).created_by) {
+        const { data: creator } = await sb
+          .from("users")
+          .select("odoo_user_id")
+          .eq("id", (campaign as any).created_by)
+          .maybeSingle();
+        odooUserId = (creator as any)?.odoo_user_id ?? null;
+      }
+
+      for (const lead of leads as any[]) {
+        await syncLead(
+          sb,
+          smartleadKey,
+          (campaign as any).smartlead_campaign_id,
+          lead,
+          (campaign as any).name ?? "Campaign",
+          odooUserId,
+        );
         leadsSynced++;
       }
     }
