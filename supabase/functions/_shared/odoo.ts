@@ -38,6 +38,11 @@ interface OdooStage {
   id: number;
   name: string;
   sequence: number;
+  // Odoo forces probability to 100 on any stage flagged is_won, which is
+  // how a misconfigured pipeline ends up reporting replies as closed
+  // deals. Published with the stage list so the flag is inspectable from
+  // our side — diagnosing it otherwise means logging into Odoo.
+  is_won?: boolean;
 }
 
 // Matched against the org's real stage names in order of preference. The
@@ -139,9 +144,13 @@ export async function parseOdooResponse(res: Response, label: string): Promise<a
 }
 
 export async function fetchStages(settings: OdooSettings): Promise<OdooStage[]> {
-  const res = await odooCall(settings, "crm.stage", "search_read", [[], ["name", "sequence"]], {
-    order: "sequence asc",
-  });
+  const res = await odooCall(
+    settings,
+    "crm.stage",
+    "search_read",
+    [[], ["name", "sequence", "is_won"]],
+    { order: "sequence asc" },
+  );
   const json = await parseOdooResponse(res, "stage lookup");
   return (json?.result ?? []) as OdooStage[];
 }

@@ -103,7 +103,12 @@ Deno.serve(async (req) => {
             org_id: orgId,
             key: "odoo_stages",
             value: JSON.stringify(
-              stages.map((s) => ({ id: s.id, name: s.name, sequence: s.sequence })),
+              stages.map((s) => ({
+                id: s.id,
+                name: s.name,
+                sequence: s.sequence,
+                is_won: !!s.is_won,
+              })),
             ),
             updated_at: new Date().toISOString(),
           },
