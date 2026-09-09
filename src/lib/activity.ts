@@ -1,11 +1,14 @@
 import { supabase } from "@/lib/supabase";
+import type { Json } from "@/types/db";
 
 interface LogActivityParams {
   orgId: string;
   actorId: string;
   action: string;
   summary: string;
-  metadata?: Record<string, unknown>;
+  // Matches the jsonb column: anything stored here has to survive a
+  // round-trip through JSON, which Record<string, unknown> doesn't promise.
+  metadata?: { [key: string]: Json };
 }
 
 // Fire-and-forget: never let a logging failure break the action it's

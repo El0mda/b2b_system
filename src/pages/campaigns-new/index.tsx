@@ -29,7 +29,7 @@ const INITIAL_STATE: WizardState = {
     revenue: "",
     technologies: [],
     job_titles: [],
-    department: "",
+    departments: [],
     seniorities: [],
     contact_location: "",
     data_points: [],

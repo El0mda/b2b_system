@@ -242,11 +242,18 @@ export function StepLaunch({
       setPhase("schedule");
       await sleep(300);
 
-      // Increment usage
-      await supabase.rpc("increment_leads_used", {
+      // Increment usage. Deliberately non-fatal — the campaign is already
+      // live in SmartLead by this point, so failing the launch over a
+      // billing counter would be worse than under-counting. But it is
+      // logged: this call silently failed against a function that didn't
+      // exist for the whole life of the launch flow (fixed in 0016).
+      const { error: usageError } = await supabase.rpc("increment_leads_used", {
         p_org_id: orgId,
         p_amount: newLeads.length,
-      }).then(() => undefined, () => {});
+      });
+      if (usageError) {
+        console.error("Failed to record lead usage:", usageError.message);
+      }
 
       setPhase("complete");
       setLaunchedCampaignId(campaign.id);

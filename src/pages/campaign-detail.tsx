@@ -109,6 +109,8 @@ interface Lead {
   email_valid: boolean | null;
   synced_to_odoo: boolean | null;
   odoo_lead_id: string | null;
+  odoo_stage: string | null;
+  odoo_stage_synced_at: string | null;
   created_at: string | null;
 }
 
@@ -1026,7 +1028,9 @@ function TabActivity({
   // Odoo syncs
   leads.filter((l) => l.synced_to_odoo).forEach((l) => {
     events.push({
-      time: l.updated_at ?? l.created_at ?? "",
+      // leads has no updated_at column, so the closest stamp to when the
+      // opportunity was last touched is the Odoo stage sync.
+      time: l.odoo_stage_synced_at ?? l.created_at ?? "",
       icon: CheckCircle2,
       label: `Opportunity created in Odoo for ${l.full_name ?? l.email ?? "contact"}`,
       desc: l.odoo_lead_id ? `Odoo Lead ID: ${l.odoo_lead_id}` : "",
