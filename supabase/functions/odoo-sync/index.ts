@@ -12,7 +12,7 @@
 
 // deno-lint-ignore-file no-explicit-any
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
-import { getOdooSettings, odooCall } from "../_shared/odoo.ts";
+import { fetchStages, getOdooSettings, odooCall } from "../_shared/odoo.ts";
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
@@ -82,6 +82,14 @@ Deno.serve(async (req) => {
         continue;
       }
       const records: any[] = resJson?.result ?? [];
+      const stages = await fetchStages(settings);
+      // A pipeline that names its own won/lost stages is telling us how it
+      // models outcomes, and that has to win over Odoo's probability
+      // convention. Verified against this instance: a stage literally
+      // named "won" sat at probability 50 while "reply" was flagged
+      // is_won and hit 100 — so trusting probability alone marked replies
+      // as won deals and never recorded an actual win.
+      const namesOutcomeStages = stages.some((s) => /\b(won|lost)\b/i.test(s.name));
 
       const now = new Date().toISOString();
       for (const record of records) {
@@ -89,11 +97,16 @@ Deno.serve(async (req) => {
         if (!localLeadId) continue;
         // Many2one fields come back as [id, "Display Name"].
         const stageName = Array.isArray(record.stage_id) ? record.stage_id[1] : null;
-        // Odoo's own convention: archived (active=false) means lost;
-        // still-active with probability at 100 means won; anything else
-        // is still an open deal.
-        const odooWon =
-          record.active === false ? false : record.probability === 100 ? true : null;
+        let odooWon: boolean | null = null;
+        if (record.active === false) {
+          odooWon = false; // archived via Odoo's "Mark Lost" action
+        } else if (stageName && /\blost\b/i.test(stageName)) {
+          odooWon = false;
+        } else if (stageName && /\bwon\b/i.test(stageName)) {
+          odooWon = true;
+        } else if (!namesOutcomeStages && record.probability === 100) {
+          odooWon = true;
+        }
         await sb
           .from("leads")
           .update({

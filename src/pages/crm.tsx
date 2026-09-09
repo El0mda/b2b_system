@@ -15,6 +15,8 @@ import {
   CheckCircle2,
   AlertCircle,
   Boxes,
+  Trophy,
+  XCircle,
 } from "lucide-react";
 
 import { supabase } from "@/lib/supabase";
@@ -43,19 +45,27 @@ interface CrmLead {
   synced_to_odoo: boolean | null;
   odoo_stage: string | null;
   odoo_stage_synced_at: string | null;
+  odoo_won: boolean | null;
   campaign_id: string | null;
   campaigns: { name: string } | null;
 }
 
-type Column = "opened" | "clicked" | "replied";
+type Column = "opened" | "clicked" | "replied" | "won" | "lost";
 
 const COLUMNS: { id: Column; label: string; icon: typeof Eye }[] = [
   { id: "opened", label: "Opened", icon: Eye },
   { id: "clicked", label: "Clicked", icon: MousePointerClick },
   { id: "replied", label: "Replied", icon: MessageSquare },
+  { id: "won", label: "Won", icon: Trophy },
+  { id: "lost", label: "Lost", icon: XCircle },
 ];
 
+// Won/Lost come from Odoo (synced twice a day) and outrank local
+// engagement — a closed deal belongs in its outcome column no matter how
+// far the emails got.
 function columnFor(lead: CrmLead): Column {
+  if (lead.odoo_won === true) return "won";
+  if (lead.odoo_won === false) return "lost";
   if (lead.replied_at) return "replied";
   if (lead.email_clicked) return "clicked";
   return "opened";
@@ -77,7 +87,7 @@ export default function CrmPage() {
       const { data, error } = await supabase
         .from("leads")
         .select(
-          "id, first_name, last_name, full_name, email, company, job_title, location, phone, website, linkedin_url, email_opened, email_clicked, replied_at, reply_text, synced_to_odoo, odoo_stage, odoo_stage_synced_at, campaign_id, campaigns(name)",
+          "id, first_name, last_name, full_name, email, company, job_title, location, phone, website, linkedin_url, email_opened, email_clicked, replied_at, reply_text, synced_to_odoo, odoo_stage, odoo_stage_synced_at, odoo_won, campaign_id, campaigns(name)",
         )
         .eq("org_id", orgId!)
         .eq("email_opened", true)
@@ -88,7 +98,13 @@ export default function CrmPage() {
   });
 
   const byColumn = useMemo(() => {
-    const grouped: Record<Column, CrmLead[]> = { opened: [], clicked: [], replied: [] };
+    const grouped: Record<Column, CrmLead[]> = {
+      opened: [],
+      clicked: [],
+      replied: [],
+      won: [],
+      lost: [],
+    };
     for (const lead of leads) {
       grouped[columnFor(lead)].push(lead);
     }
@@ -106,11 +122,11 @@ export default function CrmPage() {
         </span>
       </div>
       <p className="text-sm text-muted-foreground">
-        This board tracks engagement only — once a lead clicks or replies, the deal itself is
-        managed in Odoo. Each card shows its live Odoo stage once synced.
+        Once a lead clicks or replies the deal is managed in Odoo — each card shows its live Odoo
+        stage, and Won/Lost reflect the outcome recorded there. Synced twice a day.
       </p>
 
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-3 xl:grid-cols-5">
         {COLUMNS.map((col) => (
           <div key={col.id} className="space-y-3">
             <div className="flex items-center gap-2 px-1 text-sm font-semibold text-foreground">

@@ -138,7 +138,7 @@ export async function parseOdooResponse(res: Response, label: string): Promise<a
   return parsed;
 }
 
-async function fetchStages(settings: OdooSettings): Promise<OdooStage[]> {
+export async function fetchStages(settings: OdooSettings): Promise<OdooStage[]> {
   const res = await odooCall(settings, "crm.stage", "search_read", [[], ["name", "sequence"]], {
     order: "sequence asc",
   });
