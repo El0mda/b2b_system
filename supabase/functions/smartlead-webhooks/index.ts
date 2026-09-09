@@ -32,7 +32,14 @@
 
 // deno-lint-ignore-file no-explicit-any
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
-import { pushLeadToOdoo } from "../_shared/odoo.ts";
+import { pushLeadToOdoo, type EngagementLevel } from "../_shared/odoo.ts";
+
+const EVENT_LEVEL: Record<string, EngagementLevel | undefined> = {
+  EMAIL_SENT: "delivered",
+  EMAIL_OPENED: "opened",
+  EMAIL_CLICKED: "clicked",
+  EMAIL_REPLIED: "replied",
+};
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
@@ -146,12 +153,12 @@ Deno.serve(async (req) => {
       if (error) return json({ error: error.message }, 500);
     }
 
-    // Push to Odoo: earliest signal creates a plain lead there, a reply
-    // creates (or upgrades an already-pushed lead to) an opportunity.
-    // TEMPORARY: also pushing on EMAIL_SENT (delivery) instead of waiting
-    // for a real click, so testing doesn't need someone to actually click
-    // a link — revert to CLICKED/REPLIED only once real traffic is ready.
-    if (event === "EMAIL_SENT" || event === "EMAIL_CLICKED" || event === "EMAIL_REPLIED") {
+    // Push to Odoo and move the opportunity along the org's pipeline as
+    // engagement progresses. pushLeadToOdoo only ever advances a deal, so
+    // re-firing on an event we've already seen is a no-op rather than
+    // dragging a manually-moved deal backwards.
+    const level = EVENT_LEVEL[event];
+    if (level) {
       try {
         const { data: leadForOdoo } = await sb
           .from("leads")
@@ -160,7 +167,7 @@ Deno.serve(async (req) => {
           )
           .eq("id", leadRowId)
           .maybeSingle();
-        if (leadForOdoo && (event === "EMAIL_REPLIED" || !leadForOdoo.synced_to_odoo)) {
+        if (leadForOdoo) {
           let odooUserId: string | null = null;
           if (campaign.created_by) {
             const { data: creator } = await sb
@@ -171,11 +178,11 @@ Deno.serve(async (req) => {
             odooUserId = creator?.odoo_user_id ?? null;
           }
           await pushLeadToOdoo(sb, leadForOdoo, {
-            asOpportunity: event === "EMAIL_REPLIED",
+            level,
             campaignName: campaign.name,
             odooUserId,
             note:
-              event === "EMAIL_REPLIED"
+              level === "replied"
                 ? `Campaign: ${campaign.name}\nReply: ${now}\n\n${(body.reply?.body ?? "").slice(0, 2000)}`
                 : undefined,
           });

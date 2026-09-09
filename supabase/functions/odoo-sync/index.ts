@@ -62,6 +62,7 @@ Deno.serve(async (req) => {
       // are silently dropped from the result instead of being returned.
       const res = await odooCall(
         settings,
+        "crm.lead",
         "read",
         [odooIds, ["stage_id", "probability", "active", "expected_revenue"]],
         { context: { active_test: false } },
