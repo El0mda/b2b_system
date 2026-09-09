@@ -34,9 +34,11 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
 import { pushLeadToOdoo, type EngagementLevel } from "../_shared/odoo.ts";
 
+// Only signals that take deliberate human action reach Odoo. Delivery
+// says nothing about the recipient, and opens are unreliable — Gmail
+// pre-fetches tracking pixels on its own servers, so an "open" is
+// frequently a machine. Both still update the local lead row.
 const EVENT_LEVEL: Record<string, EngagementLevel | undefined> = {
-  EMAIL_SENT: "delivered",
-  EMAIL_OPENED: "opened",
   EMAIL_CLICKED: "clicked",
   EMAIL_REPLIED: "replied",
 };
@@ -153,10 +155,10 @@ Deno.serve(async (req) => {
       if (error) return json({ error: error.message }, 500);
     }
 
-    // Push to Odoo and move the opportunity along the org's pipeline as
-    // engagement progresses. pushLeadToOdoo only ever advances a deal, so
-    // re-firing on an event we've already seen is a no-op rather than
-    // dragging a manually-moved deal backwards.
+    // Push to Odoo and move the opportunity along the org's pipeline.
+    // pushLeadToOdoo only ever advances a deal, so re-firing on an event
+    // we've already seen is a no-op rather than dragging a
+    // manually-moved deal backwards.
     const level = EVENT_LEVEL[event];
     if (level) {
       try {

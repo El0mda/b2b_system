@@ -115,9 +115,9 @@ async function syncLead(
   // Push to Odoo — mirrors smartlead-webhooks' push logic. SmartLead's
   // webhooks don't reliably fire in this account (see the file header),
   // so this polling path is often the one that actually observes
-  // delivery/open/click/reply first — it needs the same push, not just
-  // the webhook handler, or leads on a campaign whose webhook events
-  // never arrive would never reach Odoo at all.
+  // engagement first — it needs the same push, not just the webhook
+  // handler, or leads on a campaign whose webhook events never arrive
+  // would never reach Odoo at all.
   const before = highestLevel(lead);
   const after = highestLevel({
     email_delivered: (updates.email_delivered ?? lead.email_delivered) as boolean | null,
@@ -125,7 +125,12 @@ async function syncLead(
     email_clicked: (updates.email_clicked ?? lead.email_clicked) as boolean | null,
     replied_at: (updates.replied_at ?? lead.replied_at) as string | null,
   });
-  if (!after) return;
+  // Unlike the webhook path, this derives the level from the lead's full
+  // current state rather than a single event, so the floor has to be
+  // explicit: delivery says nothing about the recipient, and opens are
+  // unreliable (Gmail pre-fetches tracking pixels). Only a click or a
+  // reply reaches Odoo — the rest still update the lead row above.
+  if (!after || levelRank(after) < levelRank("clicked")) return;
 
   // This re-runs against the same rows every 5 minutes, so only push when
   // the lead isn't in Odoo yet or has actually moved up a level —
