@@ -1,12 +1,15 @@
 // Supabase Edge Function: odoo-sync
 //
-// Polls Odoo twice a day (see the odoo-stage-sync cron job in migration
-// 0012) for the current stage of every lead already pushed to Odoo, and
-// mirrors the stage name back onto leads.odoo_stage. Odoo owns deal
-// progression now — this is read-only, display-only.
+// Polls Odoo every 5 minutes (see the odoo-stage-sync cron job, set in
+// migration 0012 and rescheduled in 0015) for the current stage of every
+// lead already pushed to Odoo, and mirrors the stage name back onto
+// leads.odoo_stage. Odoo owns deal progression now — this is read-only,
+// display-only. It also publishes the org's stage list so the app's
+// Pipeline board can draw Odoo's real columns.
 //
 // No Supabase auth required (deploy with --no-verify-jwt) — called by
-// the cron schedule (server-to-server), same pattern as smartlead-sync.
+// the cron schedule (server-to-server) and by the app's "Refresh from
+// Odoo" button, same pattern as smartlead-sync.
 //
 // Deploy: supabase functions deploy odoo-sync --no-verify-jwt
 
@@ -90,6 +93,23 @@ Deno.serve(async (req) => {
       // is_won and hit 100 — so trusting probability alone marked replies
       // as won deals and never recorded an actual win.
       const namesOutcomeStages = stages.some((s) => /\b(won|lost)\b/i.test(s.name));
+
+      // Publish the stage list so the app's Pipeline board can render the
+      // org's real Odoo columns in the org's real order. The board can't
+      // ask Odoo directly — the credentials only exist server-side.
+      if (stages.length > 0) {
+        await sb.from("settings").upsert(
+          {
+            org_id: orgId,
+            key: "odoo_stages",
+            value: JSON.stringify(
+              stages.map((s) => ({ id: s.id, name: s.name, sequence: s.sequence })),
+            ),
+            updated_at: new Date().toISOString(),
+          },
+          { onConflict: "org_id,key" },
+        );
+      }
 
       const now = new Date().toISOString();
       for (const record of records) {

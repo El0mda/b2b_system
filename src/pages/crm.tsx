@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { format } from "date-fns";
 import {
   Eye,
@@ -17,6 +17,8 @@ import {
   Boxes,
   Trophy,
   XCircle,
+  Clock,
+  RefreshCw,
 } from "lucide-react";
 
 import { supabase } from "@/lib/supabase";
@@ -50,66 +52,107 @@ interface CrmLead {
   campaigns: { name: string } | null;
 }
 
-type Column = "opened" | "clicked" | "replied" | "won" | "lost";
+interface OdooStage {
+  id: number;
+  name: string;
+  sequence: number;
+}
 
-const COLUMNS: { id: Column; label: string; icon: typeof Eye }[] = [
-  { id: "opened", label: "Opened", icon: Eye },
-  { id: "clicked", label: "Clicked", icon: MousePointerClick },
-  { id: "replied", label: "Replied", icon: MessageSquare },
-  { id: "won", label: "Won", icon: Trophy },
-  { id: "lost", label: "Lost", icon: XCircle },
-];
+// Leads that haven't reached Odoo yet (no click or reply) have no stage
+// there, so they'd otherwise vanish from this board entirely.
+const NOT_IN_ODOO = "__not_in_odoo__";
 
-// Won/Lost come from Odoo (synced twice a day) and outrank local
-// engagement — a closed deal belongs in its outcome column no matter how
-// far the emails got.
-function columnFor(lead: CrmLead): Column {
-  if (lead.odoo_won === true) return "won";
-  if (lead.odoo_won === false) return "lost";
-  if (lead.replied_at) return "replied";
-  if (lead.email_clicked) return "clicked";
-  return "opened";
+function iconForStage(name: string) {
+  if (/\bwon\b/i.test(name)) return Trophy;
+  if (/\blost\b/i.test(name)) return XCircle;
+  if (/repl/i.test(name)) return MessageSquare;
+  if (/click/i.test(name)) return MousePointerClick;
+  if (/open/i.test(name)) return Eye;
+  return Boxes;
 }
 
 export default function CrmPage() {
   const { organization } = useAuth();
   const orgId = organization?.id;
   const [selected, setSelected] = useState<CrmLead | null>(null);
+  const queryClient = useQueryClient();
+
+  // Odoo is polled on a schedule, so the board can lag a stage change by
+  // a few minutes. This pulls right now for someone watching both
+  // screens at once.
+  const refresh = useMutation({
+    mutationFn: async () => {
+      const { error } = await supabase.functions.invoke("odoo-sync", { body: {} });
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["crm-leads", orgId] });
+      queryClient.invalidateQueries({ queryKey: ["odoo-stages", orgId] });
+    },
+  });
+
+  // The board mirrors the org's real Odoo pipeline. The stage list is
+  // published by odoo-sync (the browser has no Odoo credentials), so
+  // until that first runs there are no Odoo columns to draw.
+  const { data: stages = [] } = useQuery<OdooStage[]>({
+    queryKey: ["odoo-stages", orgId],
+    enabled: !!orgId,
+    queryFn: async () => {
+      const { data } = await supabase
+        .from("settings")
+        .select("value")
+        .eq("org_id", orgId!)
+        .eq("key", "odoo_stages")
+        .maybeSingle();
+      if (!data?.value) return [];
+      try {
+        return (JSON.parse(data.value) as OdooStage[]).sort(
+          (a, b) => a.sequence - b.sequence,
+        );
+      } catch {
+        return [];
+      }
+    },
+  });
 
   const { data: leads = [], isLoading } = useQuery<CrmLead[]>({
     queryKey: ["crm-leads", orgId],
     enabled: !!orgId,
     queryFn: async () => {
       // RLS already scopes this to campaigns the caller owns (or all of
-      // them, for owner/admin) — no extra filtering needed here. Deal
-      // progression itself now lives in Odoo (see odoo_stage, pulled in
-      // twice a day) — this board only reflects local engagement.
+      // them, for owner/admin) — no extra filtering needed here.
       const { data, error } = await supabase
         .from("leads")
         .select(
           "id, first_name, last_name, full_name, email, company, job_title, location, phone, website, linkedin_url, email_opened, email_clicked, replied_at, reply_text, synced_to_odoo, odoo_stage, odoo_stage_synced_at, odoo_won, campaign_id, campaigns(name)",
         )
         .eq("org_id", orgId!)
-        .eq("email_opened", true)
         .order("replied_at", { ascending: false, nullsFirst: false });
       if (error) throw error;
       return (data ?? []) as unknown as CrmLead[];
     },
   });
 
+  const columns = useMemo(
+    () => [
+      { key: NOT_IN_ODOO, label: "Not in Odoo yet", icon: Clock },
+      ...stages.map((s) => ({ key: s.name, label: s.name, icon: iconForStage(s.name) })),
+    ],
+    [stages],
+  );
+
   const byColumn = useMemo(() => {
-    const grouped: Record<Column, CrmLead[]> = {
-      opened: [],
-      clicked: [],
-      replied: [],
-      won: [],
-      lost: [],
-    };
+    const grouped: Record<string, CrmLead[]> = {};
+    for (const col of columns) grouped[col.key] = [];
     for (const lead of leads) {
-      grouped[columnFor(lead)].push(lead);
+      // Match on the stage name Odoo reported for this lead. An unknown
+      // name (stage renamed or deleted since the last sync) falls back
+      // rather than dropping the lead off the board.
+      const key = lead.odoo_stage && grouped[lead.odoo_stage] ? lead.odoo_stage : NOT_IN_ODOO;
+      grouped[key].push(lead);
     }
     return grouped;
-  }, [leads]);
+  }, [leads, columns]);
 
   if (isLoading) return <FullPageSpinner />;
 
@@ -120,29 +163,51 @@ export default function CrmPage() {
         <span className="rounded-full bg-muted px-3 py-1 text-sm font-medium">
           {leads.length}
         </span>
+        <Button
+          variant="outline"
+          size="sm"
+          className="ml-auto"
+          onClick={() => refresh.mutate()}
+          disabled={refresh.isPending}
+        >
+          <RefreshCw className={cn("h-4 w-4", refresh.isPending && "animate-spin")} />
+          {refresh.isPending ? "Refreshing…" : "Refresh from Odoo"}
+        </Button>
       </div>
       <p className="text-sm text-muted-foreground">
-        Once a lead clicks or replies the deal is managed in Odoo — each card shows its live Odoo
-        stage, and Won/Lost reflect the outcome recorded there. Synced twice a day.
+        These are your Odoo pipeline stages, mirrored here — a lead enters Odoo when it clicks or
+        replies, and everything after that is driven by Odoo. Stages sync automatically every 5
+        minutes.
       </p>
+      {refresh.isError && (
+        <p className="text-sm text-destructive">
+          Couldn't reach Odoo — check the connection in Settings.
+        </p>
+      )}
 
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-3 xl:grid-cols-5">
-        {COLUMNS.map((col) => (
-          <div key={col.id} className="space-y-3">
+      {stages.length === 0 && (
+        <p className="rounded-lg border border-dashed border-border p-4 text-sm text-muted-foreground">
+          Odoo stages haven't been synced yet — they'll appear after the next sync run.
+        </p>
+      )}
+
+      <div className="flex gap-4 overflow-x-auto pb-2">
+        {columns.map((col) => (
+          <div key={col.key} className="w-60 shrink-0 space-y-3">
             <div className="flex items-center gap-2 px-1 text-sm font-semibold text-foreground">
               <col.icon className="h-4 w-4 text-muted-foreground" />
-              {col.label}
+              <span className="truncate">{col.label}</span>
               <span className="ml-auto text-xs font-normal text-muted-foreground">
-                {byColumn[col.id].length}
+                {byColumn[col.key]?.length ?? 0}
               </span>
             </div>
             <div className="space-y-2">
-              {byColumn[col.id].length === 0 ? (
+              {(byColumn[col.key]?.length ?? 0) === 0 ? (
                 <p className="rounded-lg border border-dashed border-border p-4 text-center text-xs text-muted-foreground">
                   No leads
                 </p>
               ) : (
-                byColumn[col.id].map((lead) => (
+                byColumn[col.key].map((lead) => (
                   <button
                     key={lead.id}
                     type="button"
@@ -248,7 +313,7 @@ function LeadDetail({ lead, onClose }: { lead: CrmLead; onClose: () => void }) {
                   </div>
                 ) : (
                   <p className="text-xs text-muted-foreground">
-                    Stage not synced yet — updates twice a day.
+                    Stage not synced yet — updates every 5 minutes.
                   </p>
                 )}
                 {lead.odoo_stage_synced_at && (
