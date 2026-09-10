@@ -60,6 +60,9 @@ export interface WizardState {
   leads: WizardLead[];
   selectedLeadIds: Set<string>;
   sequenceSteps: SequenceStep[];
+  // Namespaced keys from sequence-library: "builtin:<key>" for what
+  // ships with the app, "org:<uuid>" for the workspace's own.
+  verticalKey: string;
   presetKey: string;
   campaignId: string | null;
   lushaFilters: LushaFilters;

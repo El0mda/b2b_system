@@ -1,6 +1,7 @@
 import { Navigate, Route, Routes } from "react-router-dom";
 
 import { AuthGate } from "@/components/layout/auth-gate";
+import { RequireOwner } from "@/components/layout/require-owner";
 import LoginPage from "@/pages/login";
 import SignupPage from "@/pages/signup";
 import OnboardingPage from "@/pages/onboarding";
@@ -13,6 +14,7 @@ import ImportPage from "@/pages/import";
 import NewCampaignPage from "@/pages/campaigns-new";
 import CampaignDetailPage from "@/pages/campaign-detail";
 import LeadsPage from "@/pages/leads";
+import SequencesPage from "@/pages/sequences";
 import CrmPage from "@/pages/crm";
 import AnalyticsPage from "@/pages/analytics";
 
@@ -109,10 +111,20 @@ export default function App() {
         }
       />
       <Route
+        path="/sequences"
+        element={
+          <AuthGate>
+            <SequencesPage />
+          </AuthGate>
+        }
+      />
+      <Route
         path="/settings"
         element={
           <AuthGate>
-            <SettingsPage />
+            <RequireOwner>
+              <SettingsPage />
+            </RequireOwner>
           </AuthGate>
         }
       />

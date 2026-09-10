@@ -1,16 +1,34 @@
-import { useEffect } from "react";
-import { Plus, Trash2, ArrowRight, Sparkles } from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
+import { ArrowRight, Sparkles, Layers, BookmarkPlus, Save } from "lucide-react";
 import { toast } from "sonner";
+import { useQueryClient } from "@tanstack/react-query";
 
+import { supabase } from "@/lib/supabase";
+import { useAuth } from "@/hooks/use-auth";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select } from "@/components/ui/select";
-import { Badge } from "@/components/ui/badge";
-import { SEQUENCE_PRESETS, type SequenceStep } from "@/lib/sequence-presets";
-import { PERSONALIZATION_TOKENS } from "@/lib/template";
+import {
+  Dialog,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { SequenceStepList } from "@/components/sequence/step-editor";
+import { BUILTIN_VERTICALS } from "@/lib/sequence-presets";
+import {
+  BUILTIN_PREFIX,
+  orgVerticalId,
+  templateOptions,
+  useSequenceLibrary,
+  verticalOptions,
+} from "@/lib/sequence-library";
 import type { WizardState } from "./types";
+
+const DEFAULT_VERTICAL = BUILTIN_PREFIX + BUILTIN_VERTICALS[0].key;
 
 export function StepSequences({
   state,
@@ -23,67 +41,92 @@ export function StepSequences({
   onNext: () => void;
   onBack: () => void;
 }) {
-  // Initialize from preset on first mount if no steps exist.
-  useEffect(() => {
-    if (state.sequenceSteps.length === 0) {
-      const preset = SEQUENCE_PRESETS.find((p) => p.key === state.presetKey) ?? SEQUENCE_PRESETS[0];
-      setState((p) => ({
-        ...p,
-        presetKey: preset.key,
-        sequenceSteps: clone(preset.steps),
-      }));
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  const { organization, profile } = useAuth();
+  const orgId = organization?.id;
+  const qc = useQueryClient();
+  const { verticals, templates } = useSequenceLibrary(orgId);
+  const [saveOpen, setSaveOpen] = useState(false);
 
-  const applyPreset = (key: string) => {
-    const preset = SEQUENCE_PRESETS.find((p) => p.key === key);
-    if (!preset) return;
+  const verticalChoices = useMemo(() => verticalOptions(verticals), [verticals]);
+  const verticalKey = state.verticalKey || DEFAULT_VERTICAL;
+  const templateChoices = useMemo(
+    () => templateOptions(verticalKey, templates),
+    [verticalKey, templates],
+  );
+
+  // Initialize from the selected template on first mount if no steps exist.
+  useEffect(() => {
+    if (state.sequenceSteps.length > 0) return;
+    const template =
+      templateChoices.find((t) => t.key === state.presetKey) ?? templateChoices[0];
+    if (!template) return;
+    setState((p) => ({
+      ...p,
+      verticalKey,
+      presetKey: template.key,
+      sequenceSteps: clone(template.steps),
+    }));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [templateChoices.length]);
+
+  // Switching industry switches the sequence with it — the copy is the
+  // whole point of the vertical, so leaving the old steps in place would
+  // silently send manufacturing wording to a logistics list.
+  const applyVertical = (key: string) => {
+    const first = templateOptions(key, templates)[0];
     if (
       state.sequenceSteps.length > 0 &&
-      !confirm("Replace your current sequence with this preset?")
+      !confirm("Switch vertical and replace your current sequence?")
     ) {
       return;
     }
-    setState((p) => ({ ...p, presetKey: preset.key, sequenceSteps: clone(preset.steps) }));
-    toast.success(`Loaded preset: ${preset.name}`);
-  };
-
-  const updateStep = (idx: number, patch: Partial<SequenceStep>) => {
-    setState((p) => {
-      const steps = p.sequenceSteps.map((s, i) => (i === idx ? { ...s, ...patch } : s));
-      return { ...p, sequenceSteps: steps };
-    });
-  };
-
-  const removeStep = (idx: number) => {
-    setState((p) => {
-      const steps = p.sequenceSteps
-        .filter((_, i) => i !== idx)
-        .map((s, i) => ({ ...s, step: i + 1 }));
-      return { ...p, sequenceSteps: steps };
-    });
-  };
-
-  const addStep = () => {
     setState((p) => ({
       ...p,
-      sequenceSteps: [
-        ...p.sequenceSteps,
-        {
-          step: p.sequenceSteps.length + 1,
-          delay_days: 3,
-          subject: "",
-          body: "",
-        },
-      ],
+      verticalKey: key,
+      presetKey: first?.key ?? "",
+      sequenceSteps: first ? clone(first.steps) : [],
     }));
   };
 
-  const totalDays = state.sequenceSteps.reduce((sum, s) => sum + (s.delay_days || 0), 0);
+  const applyTemplate = (key: string) => {
+    const template = templateChoices.find((t) => t.key === key);
+    if (!template) return;
+    if (
+      state.sequenceSteps.length > 0 &&
+      !confirm("Replace your current sequence with this template?")
+    ) {
+      return;
+    }
+    setState((p) => ({ ...p, presetKey: template.key, sequenceSteps: clone(template.steps) }));
+    toast.success(`Loaded: ${template.name}`);
+  };
+
+  const saveAsTemplate = async (name: string, description: string, verticalId: string) => {
+    if (!orgId) return;
+    const { error } = await supabase.from("sequence_templates").insert({
+      org_id: orgId,
+      vertical_id: verticalId,
+      created_by: profile?.id ?? null,
+      name: name.trim(),
+      description: description.trim() || null,
+      steps: state.sequenceSteps.map((s, i) => ({ ...s, step: i + 1 })),
+    });
+    if (error) {
+      toast.error(error.message || "Couldn't save the template");
+      return;
+    }
+    qc.invalidateQueries({ queryKey: ["sequence-templates", orgId] });
+    setSaveOpen(false);
+    toast.success("Saved to your sequence library");
+  };
+
+  const totalDelayDays = state.sequenceSteps.reduce((sum, s) => sum + (s.delay_days || 0), 0);
   const canContinue =
     state.sequenceSteps.length > 0 &&
     state.sequenceSteps.every((s) => s.subject.trim() && s.body.trim());
+
+  const selectedVertical = verticalChoices.find((v) => v.key === verticalKey);
+  const selectedTemplate = templateChoices.find((t) => t.key === state.presetKey);
 
   return (
     <div className="space-y-6">
@@ -91,60 +134,74 @@ export function StepSequences({
         <CardHeader>
           <div className="flex items-center gap-2">
             <Sparkles className="h-5 w-5 text-primary" />
-            <CardTitle>Sequence Presets</CardTitle>
+            <CardTitle>Vertical & Sequence</CardTitle>
           </div>
           <CardDescription>
-            Start from one of our manufacturing outbound templates, or build from scratch.
+            Pick the industry you're writing to, then a sequence written for it. Manage the library
+            on the Sequences page.
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-3">
-          <div className="space-y-1.5">
-            <Label htmlFor="preset">Preset</Label>
-            <Select
-              id="preset"
-              value={state.presetKey}
-              onChange={(e) => applyPreset(e.target.value)}
-            >
-              {SEQUENCE_PRESETS.map((p) => (
-                <option key={p.key} value={p.key}>
-                  {p.name} {p.totalDays > 0 ? `— ${p.steps.length} steps, ${p.totalDays} days` : ""}
-                </option>
-              ))}
-            </Select>
-            <p className="text-xs text-muted-foreground">
-              {SEQUENCE_PRESETS.find((p) => p.key === state.presetKey)?.description ?? ""}
-            </p>
+          <div className="grid gap-4 sm:grid-cols-2">
+            <div className="space-y-1.5">
+              <Label htmlFor="vertical">
+                <span className="flex items-center gap-1.5">
+                  <Layers className="h-3.5 w-3.5" /> Vertical
+                </span>
+              </Label>
+              <Select id="vertical" value={verticalKey} onChange={(e) => applyVertical(e.target.value)}>
+                {verticalChoices.map((v) => (
+                  <option key={v.key} value={v.key}>
+                    {v.name}
+                    {v.builtin ? " (built-in)" : ""}
+                  </option>
+                ))}
+              </Select>
+              <p className="text-xs text-muted-foreground">{selectedVertical?.description ?? ""}</p>
+            </div>
+
+            <div className="space-y-1.5">
+              <Label htmlFor="preset">Sequence</Label>
+              <Select
+                id="preset"
+                value={state.presetKey}
+                onChange={(e) => applyTemplate(e.target.value)}
+              >
+                {templateChoices.map((t) => (
+                  <option key={t.key} value={t.key}>
+                    {t.name}
+                  </option>
+                ))}
+              </Select>
+              <p className="text-xs text-muted-foreground">{selectedTemplate?.description ?? ""}</p>
+            </div>
           </div>
-          <div className="flex items-center gap-3 text-xs text-muted-foreground">
+
+          <div className="flex flex-wrap items-center gap-3 text-xs text-muted-foreground">
             <span>
               <strong className="text-foreground">{state.sequenceSteps.length}</strong> steps
             </span>
             <span>·</span>
             <span>
-              <strong className="text-foreground">{totalDays}</strong> total days
+              <strong className="text-foreground">{totalDelayDays}</strong> total days
             </span>
+            <Button
+              variant="outline"
+              size="sm"
+              className="ml-auto"
+              disabled={!canContinue}
+              onClick={() => setSaveOpen(true)}
+            >
+              <BookmarkPlus className="h-3.5 w-3.5" /> Save as template
+            </Button>
           </div>
         </CardContent>
       </Card>
 
-      <div className="space-y-4">
-        {state.sequenceSteps.map((step, idx) => (
-          <SequenceStepCard
-            key={idx}
-            step={step}
-            index={idx}
-            isFirst={idx === 0}
-            onChange={(patch) => updateStep(idx, patch)}
-            onRemove={() => removeStep(idx)}
-            canRemove={state.sequenceSteps.length > 1}
-          />
-        ))}
-
-        <Button variant="outline" onClick={addStep} className="w-full">
-          <Plus className="h-4 w-4" />
-          Add sequence step
-        </Button>
-      </div>
+      <SequenceStepList
+        steps={state.sequenceSteps}
+        onChange={(steps) => setState((p) => ({ ...p, sequenceSteps: steps }))}
+      />
 
       <div className="flex justify-between">
         <Button variant="ghost" onClick={onBack}>
@@ -155,110 +212,103 @@ export function StepSequences({
           <ArrowRight className="h-4 w-4" />
         </Button>
       </div>
+
+      {saveOpen && (
+        <SaveTemplateDialog
+          verticals={verticals}
+          defaultVerticalId={orgVerticalId(verticalKey)}
+          defaultName={state.campaignName ? `${state.campaignName} sequence` : ""}
+          onClose={() => setSaveOpen(false)}
+          onSave={saveAsTemplate}
+        />
+      )}
     </div>
   );
 }
 
-function SequenceStepCard({
-  step,
-  index,
-  isFirst,
-  onChange,
-  onRemove,
-  canRemove,
+// A template has to live in a vertical the org owns — the built-in ones
+// ship with the app and can't take new entries.
+function SaveTemplateDialog({
+  verticals,
+  defaultVerticalId,
+  defaultName,
+  onClose,
+  onSave,
 }: {
-  step: SequenceStep;
-  index: number;
-  isFirst: boolean;
-  onChange: (patch: Partial<SequenceStep>) => void;
-  onRemove: () => void;
-  canRemove: boolean;
+  verticals: Array<{ id: string; name: string }>;
+  defaultVerticalId: string | null;
+  defaultName: string;
+  onClose: () => void;
+  onSave: (name: string, description: string, verticalId: string) => Promise<void>;
 }) {
-  const insertToken = (field: "subject" | "body", token: string) => {
-    const current = step[field];
-    onChange({ [field]: `${current}{{${token}}}` } as Partial<SequenceStep>);
-  };
+  const [name, setName] = useState(defaultName);
+  const [description, setDescription] = useState("");
+  const [verticalId, setVerticalId] = useState(defaultVerticalId ?? verticals[0]?.id ?? "");
+  const [saving, setSaving] = useState(false);
 
   return (
-    <Card>
-      <CardContent className="space-y-4 p-5">
-        <div className="flex flex-wrap items-center justify-between gap-2">
-          <div className="flex items-center gap-2">
-            <Badge variant="info">Step {index + 1}</Badge>
-            {isFirst ? (
-              <Badge variant="success">Sent immediately</Badge>
-            ) : (
-              <span className="text-sm text-muted-foreground">
-                +{step.delay_days} {step.delay_days === 1 ? "day" : "days"} after previous
-              </span>
-            )}
-          </div>
-          {canRemove && (
-            <Button variant="ghost" size="sm" onClick={onRemove}>
-              <Trash2 className="h-4 w-4" />
-              Remove
-            </Button>
-          )}
-        </div>
-
-        {!isFirst && (
+    <Dialog open onClose={onClose}>
+      <DialogHeader>
+        <DialogTitle>Save as template</DialogTitle>
+        <DialogDescription>
+          Keeps this sequence in your library so the next campaign in this industry can start from
+          it.
+        </DialogDescription>
+      </DialogHeader>
+      {verticals.length === 0 ? (
+        <p className="text-sm text-muted-foreground">
+          You don't have any verticals of your own yet — create one on the Sequences page first,
+          then save into it.
+        </p>
+      ) : (
+        <div className="space-y-4">
           <div className="space-y-1.5">
-            <Label htmlFor={`delay-${index}`}>Delay (days from previous step)</Label>
+            <Label htmlFor="save-vertical">Vertical</Label>
+            <Select
+              id="save-vertical"
+              value={verticalId}
+              onChange={(e) => setVerticalId(e.target.value)}
+            >
+              {verticals.map((v) => (
+                <option key={v.id} value={v.id}>
+                  {v.name}
+                </option>
+              ))}
+            </Select>
+          </div>
+          <div className="space-y-1.5">
+            <Label htmlFor="save-name">Template name</Label>
+            <Input id="save-name" value={name} onChange={(e) => setName(e.target.value)} />
+          </div>
+          <div className="space-y-1.5">
+            <Label htmlFor="save-description">Description (optional)</Label>
             <Input
-              id={`delay-${index}`}
-              type="number"
-              min={0}
-              value={step.delay_days}
-              onChange={(e) => onChange({ delay_days: Number(e.target.value) || 0 })}
-              className="max-w-[140px]"
+              id="save-description"
+              value={description}
+              onChange={(e) => setDescription(e.target.value)}
             />
           </div>
-        )}
-
-        <div className="space-y-1.5">
-          <Label htmlFor={`subject-${index}`}>Subject</Label>
-          <Input
-            id={`subject-${index}`}
-            value={step.subject}
-            onChange={(e) => onChange({ subject: e.target.value })}
-            placeholder="e.g. {{first_name}}, quick question about {{company}}"
-          />
-          <ChipRow onInsert={(t) => insertToken("subject", t)} />
         </div>
-
-        <div className="space-y-1.5">
-          <Label htmlFor={`body-${index}`}>Body</Label>
-          <textarea
-            id={`body-${index}`}
-            value={step.body}
-            onChange={(e) => onChange({ body: e.target.value })}
-            placeholder="Hi {{first_name}},&#10;&#10;…"
-            rows={8}
-            className="flex w-full rounded-md border border-input bg-background px-3 py-2 text-sm shadow-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1"
-          />
-          <ChipRow onInsert={(t) => insertToken("body", t)} />
-        </div>
-      </CardContent>
-    </Card>
-  );
-}
-
-function ChipRow({ onInsert }: { onInsert: (token: string) => void }) {
-  return (
-    <div className="flex flex-wrap gap-1.5">
-      {PERSONALIZATION_TOKENS.map((t) => (
-        <button
-          key={t}
-          type="button"
-          onClick={() => onInsert(t)}
-          className="inline-flex items-center rounded-full border border-border bg-muted/40 px-2 py-0.5 text-xs font-medium text-muted-foreground transition-colors hover:bg-primary hover:text-white"
+      )}
+      <DialogFooter>
+        <Button variant="ghost" onClick={onClose}>
+          Cancel
+        </Button>
+        <Button
+          disabled={!name.trim() || !verticalId || saving}
+          onClick={async () => {
+            setSaving(true);
+            try {
+              await onSave(name, description, verticalId);
+            } finally {
+              setSaving(false);
+            }
+          }}
         >
-          {"{{"}
-          {t}
-          {"}}"}
-        </button>
-      ))}
-    </div>
+          <Save className="h-4 w-4" /> {saving ? "Saving…" : "Save template"}
+        </Button>
+      </DialogFooter>
+    </Dialog>
   );
 }
 

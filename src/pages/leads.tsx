@@ -1,6 +1,7 @@
 import { useState, useMemo } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { format } from "date-fns";
+import { toast } from "sonner";
 import {
   Search,
   Download,
@@ -19,6 +20,9 @@ import {
   ChevronLeft,
   ChevronRight,
   MailCheck,
+  Boxes,
+  Send,
+  Loader2,
 } from "lucide-react";
 
 import { supabase } from "@/lib/supabase";
@@ -77,6 +81,55 @@ export default function LeadsPage() {
   const [odooFilter, setOdooFilter] = useState("all");
   const [page, setPage] = useState(0);
   const [selectedLead, setSelectedLead] = useState<LeadRow | null>(null);
+  const [pushingId, setPushingId] = useState<string | null>(null);
+  const qc = useQueryClient();
+
+  // The automatic push only fires on a click or a reply. This is the
+  // manual override: any lead, at any point, straight into the Odoo
+  // pipeline. Re-pushing an already-synced lead is harmless — the edge
+  // function only ever advances a deal, never drags it backwards.
+  const pushToOdoo = useMutation({
+    mutationFn: async (leadIds: string[]) => {
+      const { data, error } = await supabase.functions.invoke("odoo-push", {
+        body: { lead_ids: leadIds },
+      });
+      // A non-2xx from an edge function surfaces as a generic "non-2xx
+      // status code" message; the real reason is in the response body.
+      if (error) {
+        const detail = await (error as any)?.context?.json?.().catch(() => null);
+        throw new Error(detail?.error ?? error.message);
+      }
+      if ((data as any)?.error) throw new Error((data as any).error);
+      return data as { pushed: number; failed: number; skipped: number };
+    },
+    onSuccess: (res, leadIds) => {
+      if (res.pushed > 0) {
+        toast.success(
+          res.pushed === 1 ? "Lead pushed to Odoo" : `${res.pushed} leads pushed to Odoo`,
+        );
+      }
+      if (res.failed > 0) {
+        toast.error(
+          `${res.failed} lead${res.failed === 1 ? "" : "s"} couldn't be pushed — check the Odoo connection.`,
+        );
+      }
+      // The slide-over holds its own copy of the row, so it needs the
+      // same update the refetch will bring to the table.
+      if (res.pushed > 0) {
+        setSelectedLead((prev) =>
+          prev && leadIds.includes(prev.id) ? { ...prev, synced_to_odoo: true } : prev,
+        );
+      }
+      qc.invalidateQueries({ queryKey: ["all-leads", orgId] });
+    },
+    onError: (e: any) => toast.error(e?.message || "Couldn't push to Odoo"),
+    onSettled: () => setPushingId(null),
+  });
+
+  const handlePush = (leadId: string) => {
+    setPushingId(leadId);
+    pushToOdoo.mutate([leadId]);
+  };
 
   const { data: campaigns = [] } = useQuery<CampaignOption[]>({
     queryKey: ["all-campaigns", orgId],
@@ -126,6 +179,12 @@ export default function LeadsPage() {
     });
   }, [allLeads, search, campaignFilter, sourceFilter, emailStatusFilter, engagementFilter, odooFilter]);
 
+  const odooCounts = useMemo(() => {
+    let synced = 0;
+    for (const l of allLeads) if (l.synced_to_odoo) synced++;
+    return { synced, notSynced: allLeads.length - synced };
+  }, [allLeads]);
+
   const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
   const paged = filtered.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE);
 
@@ -165,6 +224,35 @@ export default function LeadsPage() {
         <Button variant="outline" onClick={handleExport}>
           <Download className="h-4 w-4" /> Export CSV
         </Button>
+      </div>
+
+      <div className="grid gap-4 sm:grid-cols-2">
+        <OdooStatCard
+          icon={Boxes}
+          label="Synced to Odoo"
+          value={odooCounts.synced}
+          hint={
+            allLeads.length > 0
+              ? `${Math.round((odooCounts.synced / allLeads.length) * 100)}% of all leads`
+              : "No leads yet"
+          }
+          color="bg-emerald-500"
+          onClick={() => {
+            setOdooFilter("yes");
+            setPage(0);
+          }}
+        />
+        <OdooStatCard
+          icon={AlertCircle}
+          label="Not synced to Odoo"
+          value={odooCounts.notSynced}
+          hint="Push any of these over manually"
+          color="bg-amber-500"
+          onClick={() => {
+            setOdooFilter("no");
+            setPage(0);
+          }}
+        />
       </div>
 
       <Card>
@@ -227,6 +315,7 @@ export default function LeadsPage() {
                   <Th>Engagement</Th>
                   <Th>Reply</Th>
                   <Th>Date</Th>
+                  <Th>Odoo</Th>
                 </tr>
               </thead>
               <tbody>
@@ -265,11 +354,19 @@ export default function LeadsPage() {
                     <Td className="text-muted-foreground">
                       {l.created_at ? format(new Date(l.created_at), "MMM d, yyyy") : "—"}
                     </Td>
+                    <Td onClick={(e) => e.stopPropagation()}>
+                      <OdooCell
+                        synced={!!l.synced_to_odoo}
+                        pushing={pushingId === l.id}
+                        disabled={pushToOdoo.isPending}
+                        onPush={() => handlePush(l.id)}
+                      />
+                    </Td>
                   </tr>
                 ))}
                 {paged.length === 0 && (
                   <tr>
-                    <td colSpan={10} className="p-12 text-center text-sm text-muted-foreground">
+                    <td colSpan={11} className="p-12 text-center text-sm text-muted-foreground">
                       No leads found.
                     </td>
                   </tr>
@@ -297,7 +394,12 @@ export default function LeadsPage() {
 
       {/* Slide-over */}
       {selectedLead && (
-        <LeadSlideOver lead={selectedLead} onClose={() => setSelectedLead(null)} />
+        <LeadSlideOver
+          lead={selectedLead}
+          onClose={() => setSelectedLead(null)}
+          onPush={() => handlePush(selectedLead.id)}
+          pushing={pushingId === selectedLead.id}
+        />
       )}
     </div>
   );
@@ -307,8 +409,83 @@ function Th({ children }: { children: React.ReactNode }) {
   return <th className="whitespace-nowrap px-4 py-3 text-left text-xs font-medium uppercase tracking-wide text-muted-foreground">{children}</th>;
 }
 
-function Td({ children, className }: { children: React.ReactNode; className?: string }) {
-  return <td className={cn("whitespace-nowrap px-4 py-3 text-sm", className)}>{children}</td>;
+function Td({
+  children,
+  className,
+  onClick,
+}: {
+  children: React.ReactNode;
+  className?: string;
+  onClick?: React.MouseEventHandler<HTMLTableCellElement>;
+}) {
+  return (
+    <td className={cn("whitespace-nowrap px-4 py-3 text-sm", className)} onClick={onClick}>
+      {children}
+    </td>
+  );
+}
+
+function OdooStatCard({
+  icon: Icon,
+  label,
+  value,
+  hint,
+  color,
+  onClick,
+}: {
+  icon: typeof Boxes;
+  label: string;
+  value: number;
+  hint: string;
+  color: string;
+  onClick: () => void;
+}) {
+  return (
+    <Card className="overflow-hidden">
+      <CardContent className="p-0">
+        <button type="button" onClick={onClick} className="w-full p-5 text-left">
+          <div className="flex items-start justify-between">
+            <div>
+              <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                {label}
+              </p>
+              <p className="mt-2 text-3xl font-bold">{value}</p>
+              <p className="mt-1 text-xs text-muted-foreground">{hint}</p>
+            </div>
+            <div className={cn("flex h-10 w-10 items-center justify-center rounded-lg", color)}>
+              <Icon className="h-5 w-5 text-white" />
+            </div>
+          </div>
+        </button>
+      </CardContent>
+    </Card>
+  );
+}
+
+function OdooCell({
+  synced,
+  pushing,
+  disabled,
+  onPush,
+}: {
+  synced: boolean;
+  pushing: boolean;
+  disabled: boolean;
+  onPush: () => void;
+}) {
+  if (synced) {
+    return (
+      <Badge variant="success">
+        <CheckCircle2 className="h-3 w-3" /> In Odoo
+      </Badge>
+    );
+  }
+  return (
+    <Button variant="outline" size="sm" onClick={onPush} disabled={disabled}>
+      {pushing ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Send className="h-3.5 w-3.5" />}
+      {pushing ? "Pushing…" : "Push to Odoo"}
+    </Button>
+  );
 }
 
 function NBBadge({ result, valid }: { result: string | null; valid: boolean | null }) {
@@ -337,7 +514,17 @@ function EngagementIcons({ lead }: { lead: LeadRow }) {
   );
 }
 
-function LeadSlideOver({ lead, onClose }: { lead: LeadRow; onClose: () => void }) {
+function LeadSlideOver({
+  lead,
+  onClose,
+  onPush,
+  pushing,
+}: {
+  lead: LeadRow;
+  onClose: () => void;
+  onPush: () => void;
+  pushing: boolean;
+}) {
   return (
     <div className="fixed inset-0 z-50 flex justify-end">
       <div className="absolute inset-0 bg-black/30" onClick={onClose} />
@@ -395,8 +582,19 @@ function LeadSlideOver({ lead, onClose }: { lead: LeadRow; onClose: () => void }
                 <CheckCircle2 className="h-4 w-4" /> Synced to Odoo
               </div>
             ) : (
-              <div className="flex items-center gap-2 rounded-lg border border-border bg-muted/20 p-3 text-sm text-muted-foreground">
-                <AlertCircle className="h-4 w-4" /> Not synced
+              <div className="space-y-2">
+                <div className="flex items-center gap-2 rounded-lg border border-border bg-muted/20 p-3 text-sm text-muted-foreground">
+                  <AlertCircle className="h-4 w-4" /> Not synced — pushed automatically once this
+                  lead clicks or replies.
+                </div>
+                <Button className="w-full" onClick={onPush} disabled={pushing}>
+                  {pushing ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : (
+                    <Send className="h-4 w-4" />
+                  )}
+                  {pushing ? "Pushing to Odoo…" : "Push to Odoo now"}
+                </Button>
               </div>
             )}
           </div>

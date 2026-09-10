@@ -5,8 +5,41 @@ export interface SequenceStep {
   body: string;
 }
 
+// A vertical is the industry a sequence was written for. Copy that
+// lands with a plant manager doesn't land with a logistics director, so
+// templates are grouped by audience and the campaign wizard picks the
+// vertical first and the sequence second.
+//
+// These are the ones that ship with the app; an org adds its own on the
+// Sequences page (public.sequence_verticals), and both kinds appear
+// side by side in the picker.
+export interface SequenceVertical {
+  key: string;
+  name: string;
+  description: string;
+}
+
+export const BUILTIN_VERTICALS: SequenceVertical[] = [
+  {
+    key: "manufacturing",
+    name: "Manufacturing",
+    description: "Plant, production and operations leaders — downtime, OEE and changeover angles.",
+  },
+  {
+    key: "general",
+    name: "General B2B",
+    description: "Industry-agnostic copy that works as a starting point for any vertical.",
+  },
+];
+
+// The vertical a preset belongs to. ANY_VERTICAL shows up under every
+// vertical — that's the blank starting point, which is never
+// industry-specific.
+export const ANY_VERTICAL = "*";
+
 export interface SequencePreset {
   key: string;
+  vertical: string;
   name: string;
   description: string;
   totalDays: number;
@@ -16,6 +49,7 @@ export interface SequencePreset {
 export const SEQUENCE_PRESETS: SequencePreset[] = [
   {
     key: "pain-point",
+    vertical: "manufacturing",
     name: "Pain Point Opener",
     description: "4 steps, 10 days — surfaces a manufacturing pain point and offers a quick fix.",
     totalDays: 10,
@@ -63,6 +97,7 @@ export const SEQUENCE_PRESETS: SequencePreset[] = [
   },
   {
     key: "social-proof",
+    vertical: "manufacturing",
     name: "Social Proof Play",
     description: "4 steps, 12 days — leads with named customer wins.",
     totalDays: 12,
@@ -109,6 +144,7 @@ export const SEQUENCE_PRESETS: SequencePreset[] = [
   },
   {
     key: "value-first",
+    vertical: "manufacturing",
     name: "Value-First Approach",
     description: "4 steps, 13 days — offers a small asset before asking for time.",
     totalDays: 13,
@@ -155,6 +191,7 @@ export const SEQUENCE_PRESETS: SequencePreset[] = [
   },
   {
     key: "short-direct",
+    vertical: "manufacturing",
     name: "Short & Direct",
     description: "4 steps, 9 days — minimal copy, fast cadence.",
     totalDays: 9,
@@ -189,7 +226,84 @@ export const SEQUENCE_PRESETS: SequencePreset[] = [
     ],
   },
   {
+    key: "general-problem-solve",
+    vertical: "general",
+    name: "Problem → Proof → Ask",
+    description: "3 steps, 8 days — names a problem, backs it with a result, asks for 15 minutes.",
+    totalDays: 8,
+    steps: [
+      {
+        step: 1,
+        delay_days: 0,
+        subject: "{{first_name}} — is this a problem at {{company}}?",
+        body:
+          "Hi {{first_name}},\n\n" +
+          "Most {{title}}s I speak with say the same thing: the process works, it just takes far more manual effort than it should.\n\n" +
+          "If that's true at {{company}} too, I'd like to show you what we changed for a company your size.\n\n" +
+          "Worth 15 minutes?\n\n" +
+          "Best,\nKhaled",
+      },
+      {
+        step: 2,
+        delay_days: 3,
+        subject: "Re: {{company}}",
+        body:
+          "Hi {{first_name}},\n\n" +
+          "Adding the number I mentioned: the last team we worked with cut that effort by about a third inside the first quarter, without changing tools.\n\n" +
+          "Happy to walk you through how — Thursday or Friday?\n\n" +
+          "— Khaled",
+      },
+      {
+        step: 3,
+        delay_days: 5,
+        subject: "Should I close the loop, {{first_name}}?",
+        body:
+          "Hi {{first_name}},\n\n" +
+          "I don't want to keep landing in your inbox. Reply \"later\" and I'll check back next quarter — or \"not me\" and I'll stop.\n\n" +
+          "— Khaled",
+      },
+    ],
+  },
+  {
+    key: "general-right-person",
+    vertical: "general",
+    name: "Right Person Check",
+    description: "3 steps, 7 days — asks for the right owner instead of pitching cold.",
+    totalDays: 7,
+    steps: [
+      {
+        step: 1,
+        delay_days: 0,
+        subject: "Who owns this at {{company}}?",
+        body:
+          "Hi {{first_name}},\n\n" +
+          "Quick one — are you the right person at {{company}} for how the team handles this, or should I be speaking with someone else?\n\n" +
+          "Happy to send the 2-minute version either way.\n\n" +
+          "— Khaled",
+      },
+      {
+        step: 2,
+        delay_days: 3,
+        subject: "Re: who owns this at {{company}}",
+        body:
+          "Hi {{first_name}},\n\n" +
+          "Just a pointer is plenty — a name and I'll take it from there.\n\n" +
+          "— Khaled",
+      },
+      {
+        step: 3,
+        delay_days: 4,
+        subject: "Last one, {{first_name}}",
+        body:
+          "Hi {{first_name}},\n\n" +
+          "Assuming this isn't the right time. I'll stop here — my details are below if it becomes relevant.\n\n" +
+          "— Khaled",
+      },
+    ],
+  },
+  {
     key: "custom",
+    vertical: ANY_VERTICAL,
     name: "Custom (start blank)",
     description: "Build your own sequence from scratch.",
     totalDays: 0,
@@ -203,6 +317,18 @@ export const SEQUENCE_PRESETS: SequencePreset[] = [
     ],
   },
 ];
+
+// Presets available inside a vertical, including the always-present
+// blank starting point.
+export function presetsForVertical(verticalKey: string): SequencePreset[] {
+  return SEQUENCE_PRESETS.filter(
+    (p) => p.vertical === verticalKey || p.vertical === ANY_VERTICAL,
+  );
+}
+
+export function totalDays(steps: SequenceStep[]): number {
+  return steps.reduce((sum, s) => sum + (s.delay_days || 0), 0);
+}
 
 export function calculateScheduledDate(prevDelays: number[]): Date {
   const totalDays = prevDelays.reduce((sum, d) => sum + (d || 0), 0);

@@ -19,7 +19,8 @@ const INITIAL_STATE: WizardState = {
   leads: [],
   selectedLeadIds: new Set(),
   sequenceSteps: [],
-  presetKey: "pain-point",
+  verticalKey: "builtin:manufacturing",
+  presetKey: "builtin:pain-point",
   campaignId: null,
   lushaFilters: {
     company_name: "",

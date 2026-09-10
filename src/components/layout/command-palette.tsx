@@ -13,24 +13,32 @@ interface Command {
 
 const EXTRA_COMMANDS: Command[] = [
   { label: "New Campaign", to: "/campaigns/new", icon: ArrowRight, hint: "Create" },
-  { label: "Settings", to: "/settings", icon: Settings },
   { label: "Team", to: "/team", icon: UsersRound },
 ];
+
+// Settings is owner-only, so it's handed in rather than listed above.
+const SETTINGS_COMMAND: Command = { label: "Settings", to: "/settings", icon: Settings };
 
 export function CommandPalette({
   open,
   onClose,
+  showSettings = false,
 }: {
   open: boolean;
   onClose: () => void;
+  showSettings?: boolean;
 }) {
   const navigate = useNavigate();
   const [query, setQuery] = useState("");
   const [activeIdx, setActiveIdx] = useState(0);
 
   const commands: Command[] = useMemo(
-    () => [...NAV.map((n) => ({ label: n.label, to: n.to, icon: n.icon })), ...EXTRA_COMMANDS],
-    [],
+    () => [
+      ...NAV.map((n) => ({ label: n.label, to: n.to, icon: n.icon })),
+      ...EXTRA_COMMANDS,
+      ...(showSettings ? [SETTINGS_COMMAND] : []),
+    ],
+    [showSettings],
   );
 
   const results = useMemo(() => {

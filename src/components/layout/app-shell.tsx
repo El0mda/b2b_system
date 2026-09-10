@@ -17,6 +17,9 @@ export function AppShell({ children }: { children: ReactNode }) {
   const location = useLocation();
   const navigate = useNavigate();
   const { profile, organization, signOut } = useAuth();
+  // Workspace settings are the owner's — admins and members don't get a
+  // link to a page that would only refuse them.
+  const isOwner = profile?.role === "owner";
 
   const initials = (profile?.full_name || profile?.email || "U")
     .split(" ")
@@ -126,15 +129,17 @@ export function AppShell({ children }: { children: ReactNode }) {
                     </div>
                   </div>
                   <div className="mx-3 mb-1 h-px bg-border" />
-                  <DropdownItem
-                    icon={<Settings className="h-4 w-4" />}
-                    onSelect={() => {
-                      close();
-                      navigate("/settings");
-                    }}
-                  >
-                    Settings
-                  </DropdownItem>
+                  {isOwner && (
+                    <DropdownItem
+                      icon={<Settings className="h-4 w-4" />}
+                      onSelect={() => {
+                        close();
+                        navigate("/settings");
+                      }}
+                    >
+                      Settings
+                    </DropdownItem>
+                  )}
                   <DropdownItem
                     icon={<UsersRound className="h-4 w-4" />}
                     onSelect={() => {
@@ -198,7 +203,11 @@ export function AppShell({ children }: { children: ReactNode }) {
 
       <main className="mx-auto w-full max-w-[100rem] flex-1 px-4 py-6 lg:px-8">{children}</main>
 
-      <CommandPalette open={paletteOpen} onClose={() => setPaletteOpen(false)} />
+      <CommandPalette
+        open={paletteOpen}
+        onClose={() => setPaletteOpen(false)}
+        showSettings={isOwner}
+      />
     </div>
   );
 }

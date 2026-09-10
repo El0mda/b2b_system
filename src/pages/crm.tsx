@@ -19,7 +19,10 @@ import {
   XCircle,
   Clock,
   RefreshCw,
+  Send,
+  Loader2,
 } from "lucide-react";
+import { toast } from "sonner";
 
 import { supabase } from "@/lib/supabase";
 import { useAuth } from "@/hooks/use-auth";
@@ -76,6 +79,33 @@ export default function CrmPage() {
   const orgId = organization?.id;
   const [selected, setSelected] = useState<CrmLead | null>(null);
   const queryClient = useQueryClient();
+
+  // Manual override for a lead that hasn't clicked or replied and so
+  // never triggered the automatic push — it enters Odoo at the first
+  // stage and is worked from there like any other opportunity.
+  const push = useMutation({
+    mutationFn: async (leadId: string) => {
+      const { data, error } = await supabase.functions.invoke("odoo-push", {
+        body: { lead_ids: [leadId] },
+      });
+      if (error) {
+        const detail = await (error as any)?.context?.json?.().catch(() => null);
+        throw new Error(detail?.error ?? error.message);
+      }
+      if ((data as any)?.error) throw new Error((data as any).error);
+      return data as { pushed: number; failed: number };
+    },
+    onSuccess: (res, leadId) => {
+      if (res.pushed > 0) {
+        toast.success("Lead pushed to Odoo");
+        setSelected((prev) => (prev && prev.id === leadId ? { ...prev, synced_to_odoo: true } : prev));
+      } else {
+        toast.error("Couldn't push this lead — check the Odoo connection.");
+      }
+      queryClient.invalidateQueries({ queryKey: ["crm-leads", orgId] });
+    },
+    onError: (e: any) => toast.error(e?.message || "Couldn't push to Odoo"),
+  });
 
   // Odoo is polled on a schedule, so the board can lag a stage change by
   // a few minutes. This pulls right now for someone watching both
@@ -241,12 +271,29 @@ export default function CrmPage() {
         ))}
       </div>
 
-      {selected && <LeadDetail lead={selected} onClose={() => setSelected(null)} />}
+      {selected && (
+        <LeadDetail
+          lead={selected}
+          onClose={() => setSelected(null)}
+          onPush={() => push.mutate(selected.id)}
+          pushing={push.isPending}
+        />
+      )}
     </div>
   );
 }
 
-function LeadDetail({ lead, onClose }: { lead: CrmLead; onClose: () => void }) {
+function LeadDetail({
+  lead,
+  onClose,
+  onPush,
+  pushing,
+}: {
+  lead: CrmLead;
+  onClose: () => void;
+  onPush: () => void;
+  pushing: boolean;
+}) {
   return (
     <div className="fixed inset-0 z-50 flex justify-end">
       <div className="absolute inset-0 bg-black/30" onClick={onClose} />
@@ -323,9 +370,19 @@ function LeadDetail({ lead, onClose }: { lead: CrmLead; onClose: () => void }) {
                 )}
               </div>
             ) : (
-              <div className="flex items-center gap-2 rounded-lg border border-border bg-muted/20 p-3 text-sm text-muted-foreground">
-                <AlertCircle className="h-4 w-4" /> Not synced — pushed automatically once this
-                lead clicks or replies.
+              <div className="space-y-2">
+                <div className="flex items-center gap-2 rounded-lg border border-border bg-muted/20 p-3 text-sm text-muted-foreground">
+                  <AlertCircle className="h-4 w-4" /> Not synced — pushed automatically once this
+                  lead clicks or replies.
+                </div>
+                <Button className="w-full" onClick={onPush} disabled={pushing}>
+                  {pushing ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : (
+                    <Send className="h-4 w-4" />
+                  )}
+                  {pushing ? "Pushing to Odoo…" : "Push to Odoo now"}
+                </Button>
               </div>
             )}
           </div>
