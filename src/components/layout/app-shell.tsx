@@ -1,11 +1,12 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { Link, NavLink, useLocation, useNavigate } from "react-router-dom";
-import { Search, Bell, Menu, X, LogOut, Settings, UsersRound } from "lucide-react";
+import { Search, Menu, X, LogOut, Settings, UsersRound } from "lucide-react";
 
 import { useAuth } from "@/hooks/use-auth";
 import { NAV } from "@/components/layout/nav-items";
 import { ThemeToggle } from "@/components/layout/theme-toggle";
 import { CommandPalette } from "@/components/layout/command-palette";
+import { NotificationBell } from "@/components/layout/notification-bell";
 import { DropdownMenu, DropdownItem } from "@/components/ui/dropdown-menu";
 import { cn } from "@/lib/utils";
 import logo from "@/assets/company_logo.png";
@@ -103,13 +104,7 @@ export function AppShell({ children }: { children: ReactNode }) {
 
           <div className="flex items-center gap-1 sm:ml-1">
             <ThemeToggle />
-            <button
-              type="button"
-              className="hidden h-9 w-9 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground sm:flex"
-              aria-label="Notifications"
-            >
-              <Bell className="h-4 w-4" />
-            </button>
+            <NotificationBell />
 
             <DropdownMenu
               trigger={

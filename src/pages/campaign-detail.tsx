@@ -14,6 +14,7 @@ import {
   AlertCircle,
   Rocket,
   Mail,
+  PhoneCall,
   Phone,
   Globe,
   Building2,
@@ -117,9 +118,13 @@ interface Lead {
 interface SequenceStep {
   id: string;
   step: number;
+  step_type: string | null;
   delay_days: number | null;
-  subject: string;
-  body: string;
+  delay_hours: number | null;
+  subject: string | null;
+  body: string | null;
+  title: string | null;
+  notes: string | null;
   created_at: string | null;
 }
 
@@ -805,6 +810,18 @@ function LeadSlideOver({ lead, onClose }: { lead: Lead; onClose: () => void }) {
 
 // ─── Tab 3: Sequences ─────────────────────────────────────────────────────────
 
+// A call step has no subject or body — it's a task for a person, so it
+// shows the task title and the script instead.
+function describeStepDelay(s: SequenceStep): string {
+  const days = s.delay_days ?? 0;
+  const hours = s.delay_hours ?? 0;
+  if (!days && !hours) return "Starts immediately";
+  const parts: string[] = [];
+  if (days) parts.push(`${days} ${days === 1 ? "day" : "days"}`);
+  if (hours) parts.push(`${hours} ${hours === 1 ? "hour" : "hours"}`);
+  return `Delayed ${parts.join(" ")} after previous step`;
+}
+
 function TabSequences({ sequences }: { sequences: SequenceStep[] }) {
   if (sequences.length === 0) {
     return (
@@ -816,28 +833,49 @@ function TabSequences({ sequences }: { sequences: SequenceStep[] }) {
 
   return (
     <div className="space-y-4">
-      {sequences.map((s, i) => (
-        <Card key={s.id ?? i}>
-          <CardContent className="p-5 space-y-3">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <div className="flex h-8 w-8 items-center justify-center rounded-full bg-primary/10 text-xs font-bold text-primary">
-                  {s.step}
+      {sequences.map((s, i) => {
+        const isCall = s.step_type === "call";
+        return (
+          <Card key={s.id ?? i}>
+            <CardContent className="p-5 space-y-3">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <div
+                    className={cn(
+                      "flex h-8 w-8 items-center justify-center rounded-full text-xs font-bold",
+                      isCall ? "bg-amber-500/15 text-amber-600 dark:text-amber-400" : "bg-primary/10 text-primary",
+                    )}
+                  >
+                    {s.step}
+                  </div>
+                  <div>
+                    <p className="text-sm font-semibold">
+                      {isCall ? s.title || "Call the lead" : s.subject || "(no subject)"}
+                    </p>
+                    <p className="text-xs text-muted-foreground">{describeStepDelay(s)}</p>
+                  </div>
                 </div>
-                <div>
-                  <p className="text-sm font-semibold">{s.subject || "(no subject)"}</p>
-                  <p className="text-xs text-muted-foreground">
-                    {i === 0 ? "Sent immediately" : `Delayed ${s.delay_days ?? 0} days after previous step`}
-                  </p>
-                </div>
+                <Badge variant={isCall ? "warning" : "secondary"}>
+                  {isCall ? (
+                    <>
+                      <PhoneCall className="h-3 w-3" /> Call task
+                    </>
+                  ) : (
+                    <>
+                      <Mail className="h-3 w-3" /> Email
+                    </>
+                  )}
+                </Badge>
               </div>
-            </div>
-            <div className="rounded-lg border border-border bg-muted/20 p-3">
-              <pre className="whitespace-pre-wrap text-xs text-muted-foreground">{s.body || "(no body)"}</pre>
-            </div>
-          </CardContent>
-        </Card>
-      ))}
+              <div className="rounded-lg border border-border bg-muted/20 p-3">
+                <pre className="whitespace-pre-wrap text-xs text-muted-foreground">
+                  {isCall ? s.notes || "(no call script)" : s.body || "(no body)"}
+                </pre>
+              </div>
+            </CardContent>
+          </Card>
+        );
+      })}
     </div>
   );
 }

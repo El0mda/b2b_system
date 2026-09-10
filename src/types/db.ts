@@ -83,6 +83,95 @@ export type Database = {
         }
         Relationships: []
       }
+      call_tasks: {
+        Row: {
+          assigned_to: string | null
+          campaign_id: string | null
+          completed_at: string | null
+          created_at: string | null
+          created_by: string | null
+          due_at: string
+          id: string
+          lead_id: string | null
+          notes: string | null
+          org_id: string
+          outcome: string | null
+          sequence_id: string | null
+          snoozed_until: string | null
+          status: string
+          step: number | null
+          title: string
+          updated_at: string | null
+        }
+        Insert: {
+          assigned_to?: string | null
+          campaign_id?: string | null
+          completed_at?: string | null
+          created_at?: string | null
+          created_by?: string | null
+          due_at: string
+          id?: string
+          lead_id?: string | null
+          notes?: string | null
+          org_id: string
+          outcome?: string | null
+          sequence_id?: string | null
+          snoozed_until?: string | null
+          status?: string
+          step?: number | null
+          title: string
+          updated_at?: string | null
+        }
+        Update: {
+          assigned_to?: string | null
+          campaign_id?: string | null
+          completed_at?: string | null
+          created_at?: string | null
+          created_by?: string | null
+          due_at?: string
+          id?: string
+          lead_id?: string | null
+          notes?: string | null
+          org_id?: string
+          outcome?: string | null
+          sequence_id?: string | null
+          snoozed_until?: string | null
+          status?: string
+          step?: number | null
+          title?: string
+          updated_at?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "call_tasks_campaign_id_fkey"
+            columns: ["campaign_id"]
+            isOneToOne: false
+            referencedRelation: "campaigns"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "call_tasks_lead_id_fkey"
+            columns: ["lead_id"]
+            isOneToOne: false
+            referencedRelation: "leads"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "call_tasks_org_id_fkey"
+            columns: ["org_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "call_tasks_sequence_id_fkey"
+            columns: ["sequence_id"]
+            isOneToOne: false
+            referencedRelation: "sequences"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       campaigns: {
         Row: {
           created_at: string | null
@@ -590,31 +679,43 @@ export type Database = {
       }
       sequences: {
         Row: {
-          body: string
+          body: string | null
           campaign_id: string | null
           created_at: string | null
           delay_days: number | null
+          delay_hours: number
           id: string
+          notes: string | null
           step: number
-          subject: string
+          step_type: string
+          subject: string | null
+          title: string | null
         }
         Insert: {
-          body: string
+          body?: string | null
           campaign_id?: string | null
           created_at?: string | null
           delay_days?: number | null
+          delay_hours?: number
           id?: string
+          notes?: string | null
           step: number
-          subject: string
+          step_type?: string
+          subject?: string | null
+          title?: string | null
         }
         Update: {
-          body?: string
+          body?: string | null
           campaign_id?: string | null
           created_at?: string | null
           delay_days?: number | null
+          delay_hours?: number
           id?: string
+          notes?: string | null
           step?: number
-          subject?: string
+          step_type?: string
+          subject?: string | null
+          title?: string | null
         }
         Relationships: [
           {

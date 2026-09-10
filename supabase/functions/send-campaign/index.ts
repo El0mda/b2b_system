@@ -1,6 +1,6 @@
 // Supabase Edge Function: send-campaign
 //
-// Reads a campaign + its sequences + verified leads, then:
+// Reads a campaign + its email sequence steps + verified leads, then:
 //   1. Creates a SmartLead campaign
 //   2. Saves the email sequence
 //   3. Adds leads to the campaign
@@ -31,12 +31,43 @@ interface Lead {
 
 interface SequenceRow {
   step: number;
+  step_type: string | null;
   delay_days: number | null;
-  subject: string;
-  body: string;
+  delay_hours: number | null;
+  subject: string | null;
+  body: string | null;
 }
 
 const SMARTLEAD_API = "https://server.smartlead.ai/api/v1";
+
+interface EmailStep {
+  subject: string;
+  body: string;
+  delayDays: number;
+}
+
+// Drops call steps from the sequence while preserving the cadence:
+// every skipped step's wait is added to the next email's, and the total
+// is rounded to whole days because that's the only unit SmartLead's
+// seq_delay_details accepts.
+function buildEmailSteps(rows: SequenceRow[]): EmailStep[] {
+  const out: EmailStep[] = [];
+  let carriedHours = 0;
+  for (const row of rows) {
+    const hours = (row.delay_days ?? 0) * 24 + (row.delay_hours ?? 0);
+    if (row.step_type === "call") {
+      carriedHours += hours;
+      continue;
+    }
+    out.push({
+      subject: row.subject ?? "",
+      body: row.body ?? "",
+      delayDays: Math.round((hours + carriedHours) / 24),
+    });
+    carriedHours = 0;
+  }
+  return out;
+}
 
 // Map app template vars to SmartLead's merge tags, which mirror the lead
 // field names sent in Step C below (first_name, last_name, company_name,
@@ -146,12 +177,25 @@ Deno.serve(async (req) => {
     // 3. Fetch sequences
     const { data: sequences, error: sequencesError } = await userClient
       .from("sequences")
-      .select("step, delay_days, subject, body")
+      .select("step, step_type, delay_days, delay_hours, subject, body")
       .eq("campaign_id", campaign_id)
       .order("step", { ascending: true });
     if (sequencesError) return json({ error: sequencesError.message }, 500);
     if (!sequences || sequences.length === 0) {
       return json({ error: "No sequence steps for this campaign" }, 400);
+    }
+
+    // Call steps are worked by a human out of the app's own task list
+    // (public.call_tasks) — SmartLead never sees them. Their delay still
+    // counts, though: skipping a call step without carrying its wait
+    // forward would pull every later email earlier than intended, so the
+    // hours are folded into the next email's delay.
+    const emailSteps = buildEmailSteps(sequences as SequenceRow[]);
+    if (emailSteps.length === 0) {
+      return json(
+        { error: "This campaign has no email steps — nothing for SmartLead to send" },
+        400,
+      );
     }
 
     // ── Step A: Create SmartLead campaign ──
@@ -177,9 +221,11 @@ Deno.serve(async (req) => {
 
     // ── Step B: Save email sequence ──
     const seqPayload = {
-      sequences: (sequences as SequenceRow[]).map((s) => ({
-        seq_number: s.step,
-        seq_delay_details: { delay_in_days: s.delay_days ?? 0 },
+      sequences: emailSteps.map((s, i) => ({
+        // SmartLead numbers its own steps consecutively; the original
+        // step numbers have gaps wherever a call step was removed.
+        seq_number: i + 1,
+        seq_delay_details: { delay_in_days: s.delayDays },
         subject: toSmartleadVars(s.subject),
         email_body: toSmartleadVars(s.body).replace(/\n/g, "<br>"),
       })),
@@ -418,7 +464,7 @@ Deno.serve(async (req) => {
       ok: true,
       smartlead_campaign_id: slCampaignId,
       leads_added: (leads as Lead[]).length,
-      sequence_steps: (sequences as SequenceRow[]).length,
+      sequence_steps: emailSteps.length,
       sender_email: senderEmail,
       email_account_id: emailAccountId,
       scheduled: true,

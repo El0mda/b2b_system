@@ -10,6 +10,7 @@ import {
   Loader2,
   Users,
   Mail,
+  PhoneCall,
   CalendarClock,
   PartyPopper,
 } from "lucide-react";
@@ -30,8 +31,13 @@ import {
 } from "@/components/ui/table";
 import { Spinner } from "@/components/ui/spinner";
 import { processTemplate } from "@/lib/template";
-import { calculateScheduledDate } from "@/lib/sequence-presets";
+import {
+  offsetHoursThrough,
+  stepType,
+  type SequenceStep,
+} from "@/lib/sequence-presets";
 import { cn, getFunctionErrorMessage } from "@/lib/utils";
+import type { Database } from "@/types/db";
 import type { WizardState } from "./types";
 
 type LaunchPhase =
@@ -193,15 +199,40 @@ export function StepLaunch({
         });
       }
 
-      const sequenceRows = state.sequenceSteps.map((s) => ({
+      const sequenceRows = state.sequenceSteps.map((s, i) => ({
         campaign_id: campaign.id,
-        step: s.step,
-        delay_days: s.delay_days,
-        subject: s.subject,
-        body: s.body,
+        step: i + 1,
+        step_type: stepType(s),
+        delay_days: s.delay_days ?? 0,
+        delay_hours: s.delay_hours ?? 0,
+        subject: stepType(s) === "call" ? null : s.subject,
+        body: stepType(s) === "call" ? null : s.body,
+        title: stepType(s) === "call" ? (s.title ?? "Call the lead") : null,
+        notes: stepType(s) === "call" ? (s.notes ?? null) : null,
       }));
-      const { error: seqError } = await supabase.from("sequences").insert(sequenceRows);
+      const { data: insertedSequences, error: seqError } = await supabase
+        .from("sequences")
+        .insert(sequenceRows)
+        .select("id, step, step_type, title, notes");
       if (seqError) throw seqError;
+
+      // A call step is work for a person, not something SmartLead can
+      // run — so it becomes one reminder per lead, due at the same point
+      // in the cadence the step sits at. Non-fatal: the campaign is
+      // already saved, and a missing reminder shouldn't fail a launch.
+      try {
+        await createCallTasks({
+          steps: state.sequenceSteps,
+          sequences: insertedSequences ?? [],
+          leads: insertedLeads ?? [],
+          orgId: orgId!,
+          campaignId: campaign.id,
+          userId: profile?.id ?? null,
+        });
+      } catch (taskError) {
+        console.error("Failed to create call reminders:", taskError);
+        toast.error("Campaign launched, but the call reminders couldn't be created.");
+      }
 
       // Call send-campaign edge function (SmartLead)
       setPhase("create-campaign");
@@ -333,23 +364,42 @@ export function StepLaunch({
               first_name: "Sample",
               company: "Example Inc",
             };
+            const isCall = stepType(s) === "call";
+            const offsetHours = offsetHoursThrough(state.sequenceSteps, i);
+            const when = new Date(Date.now() + offsetHours * 60 * 60 * 1000);
             const scheduled =
-              i === 0
-                ? "Sent immediately"
-                : `Sends ${calculateScheduledDate(
-                    state.sequenceSteps.slice(0, i + 1).map((x) => x.delay_days),
-                  ).toLocaleDateString()}`;
+              offsetHours === 0
+                ? isCall
+                  ? "Due at launch"
+                  : "Sent immediately"
+                : `${isCall ? "Due" : "Sends"} ${when.toLocaleString([], {
+                    dateStyle: "medium",
+                    timeStyle: "short",
+                  })}`;
             return (
               <div key={i} className="rounded-md border border-border p-3">
                 <div className="mb-2 flex items-center gap-2">
                   <Badge variant="info">Step {i + 1}</Badge>
+                  {isCall ? (
+                    <Badge variant="warning">
+                      <PhoneCall className="h-3 w-3" /> Call
+                    </Badge>
+                  ) : (
+                    <Badge variant="secondary">
+                      <Mail className="h-3 w-3" /> Email
+                    </Badge>
+                  )}
                   <span className="text-xs text-muted-foreground">{scheduled}</span>
                 </div>
                 <div className="text-sm font-semibold">
-                  {processTemplate(s.subject, previewLead) || "(no subject)"}
+                  {isCall
+                    ? processTemplate(s.title ?? "", previewLead) || "Call the lead"
+                    : processTemplate(s.subject, previewLead) || "(no subject)"}
                 </div>
                 <p className="mt-1 line-clamp-3 whitespace-pre-wrap text-xs text-muted-foreground">
-                  {processTemplate(s.body, previewLead) || "(no body)"}
+                  {isCall
+                    ? processTemplate(s.notes ?? "", previewLead) || "No call script"
+                    : processTemplate(s.body, previewLead) || "(no body)"}
                 </p>
               </div>
             );
@@ -535,6 +585,74 @@ function ProgressRow({
       <span className={cn(done ? "text-foreground font-medium" : "text-muted-foreground")}>{label}</span>
     </div>
   );
+}
+
+// Fans every call step out across every lead. due_at is launch time
+// plus the cumulative delay of all steps up to and including the call,
+// which puts it on the same clock as the emails around it.
+async function createCallTasks({
+  steps,
+  sequences,
+  leads,
+  orgId,
+  campaignId,
+  userId,
+}: {
+  steps: SequenceStep[];
+  sequences: Array<{ id: string; step: number; step_type: string | null; title: string | null; notes: string | null }>;
+  leads: Array<{
+    id: string;
+    email: string | null;
+    first_name: string | null;
+    last_name: string | null;
+    full_name: string | null;
+    company: string | null;
+    job_title: string | null;
+    location: string | null;
+  }>;
+  orgId: string;
+  campaignId: string;
+  userId: string | null;
+}): Promise<void> {
+  const launchedAt = Date.now();
+  const rows: Database["public"]["Tables"]["call_tasks"]["Insert"][] = [];
+
+  steps.forEach((step, index) => {
+    if (stepType(step) !== "call") return;
+    const sequenceRow = sequences.find((r) => r.step === index + 1);
+    const dueAt = new Date(
+      launchedAt + offsetHoursThrough(steps, index) * 60 * 60 * 1000,
+    ).toISOString();
+
+    for (const lead of leads) {
+      rows.push({
+        org_id: orgId,
+        campaign_id: campaignId,
+        lead_id: lead.id,
+        sequence_id: sequenceRow?.id ?? null,
+        step: index + 1,
+        // The person who launched the campaign owns the calls; the task
+        // is reassignable from the Tasks page afterwards.
+        assigned_to: userId,
+        created_by: userId,
+        // Templated the same way an email subject is, so the reminder
+        // reads "Call Sara at ACME" rather than "Call the lead".
+        title: processTemplate(step.title?.trim() || "Call {{first_name}} at {{company}}", lead),
+        notes: step.notes ? processTemplate(step.notes, lead) : null,
+        due_at: dueAt,
+      });
+    }
+  });
+
+  if (rows.length === 0) return;
+
+  // Chunked: a campaign with a few hundred leads and two call steps
+  // would otherwise be a single insert of a thousand-plus rows.
+  const CHUNK = 500;
+  for (let i = 0; i < rows.length; i += CHUNK) {
+    const { error } = await supabase.from("call_tasks").insert(rows.slice(i, i + CHUNK));
+    if (error) throw error;
+  }
 }
 
 function sleep(ms: number) {

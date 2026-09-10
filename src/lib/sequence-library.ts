@@ -126,9 +126,15 @@ export function parseSteps(value: unknown): SequenceStep[] {
       const s = (raw ?? {}) as Record<string, unknown>;
       return {
         step: typeof s.step === "number" ? s.step : i + 1,
+        // Anything not explicitly a call is an email, which also covers
+        // every template saved before call steps existed.
+        type: s.type === "call" ? ("call" as const) : ("email" as const),
         delay_days: typeof s.delay_days === "number" ? s.delay_days : 0,
+        delay_hours: typeof s.delay_hours === "number" ? s.delay_hours : 0,
         subject: typeof s.subject === "string" ? s.subject : "",
         body: typeof s.body === "string" ? s.body : "",
+        title: typeof s.title === "string" ? s.title : undefined,
+        notes: typeof s.notes === "string" ? s.notes : undefined,
       };
     })
     .sort((a, b) => a.step - b.step);

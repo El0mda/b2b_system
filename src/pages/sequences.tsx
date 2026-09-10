@@ -15,6 +15,7 @@ import {
   Save,
   X,
   Mail,
+  PhoneCall,
   ArrowLeft,
 } from "lucide-react";
 
@@ -34,7 +35,7 @@ import {
 } from "@/components/ui/dialog";
 import { FullPageSpinner } from "@/components/ui/spinner";
 import { SequenceStepList } from "@/components/sequence/step-editor";
-import { totalDays, type SequenceStep } from "@/lib/sequence-presets";
+import { isStepComplete, stepType, totalDays, type SequenceStep } from "@/lib/sequence-presets";
 import {
   templateOptions,
   useSequenceLibrary,
@@ -351,8 +352,15 @@ export default function SequencesPage() {
                     </div>
                     <div className="flex items-center gap-3 text-xs text-muted-foreground">
                       <span className="flex items-center gap-1">
-                        <Mail className="h-3.5 w-3.5" /> {t.steps.length} steps
+                        <Mail className="h-3.5 w-3.5" />
+                        {t.steps.filter((s) => stepType(s) === "email").length} emails
                       </span>
+                      {t.steps.some((s) => stepType(s) === "call") && (
+                        <span className="flex items-center gap-1">
+                          <PhoneCall className="h-3.5 w-3.5" />
+                          {t.steps.filter((s) => stepType(s) === "call").length} calls
+                        </span>
+                      )}
                       <span>{totalDays(t.steps)} days</span>
                     </div>
                     <div className="flex flex-wrap gap-1.5">
@@ -559,9 +567,7 @@ function TemplateEditor({
   onSave: () => void;
 }) {
   const complete =
-    draft.name.trim().length > 0 &&
-    draft.steps.length > 0 &&
-    draft.steps.every((s) => s.subject.trim() && s.body.trim());
+    draft.name.trim().length > 0 && draft.steps.length > 0 && draft.steps.every(isStepComplete);
 
   return (
     <div className="space-y-6">
@@ -622,7 +628,8 @@ function TemplateEditor({
 
       {!complete && (
         <p className="text-sm text-muted-foreground">
-          Give the sequence a name, and fill in a subject and body for every step.
+          Give the sequence a name, fill in a subject and body for every email step, and a title
+          for every call step.
         </p>
       )}
     </div>

@@ -1,8 +1,54 @@
+// A step is either an email SmartLead sends, or a call somebody on the
+// team has to make. `type` is optional because every template written
+// before call steps existed is an email step, and rewriting stored
+// JSONB to say so would be busywork — read it through stepType().
+export type SequenceStepType = "email" | "call";
+
 export interface SequenceStep {
   step: number;
+  type?: SequenceStepType;
   delay_days: number;
+  // Emails are scheduled in whole days (SmartLead's unit); a call is
+  // routinely "6 hours after the email", so the delay carries both.
+  delay_hours?: number;
   subject: string;
   body: string;
+  // Call steps only: what the task says, and the script to work from.
+  title?: string;
+  notes?: string;
+}
+
+export function stepType(step: SequenceStep): SequenceStepType {
+  return step.type === "call" ? "call" : "email";
+}
+
+// A step's delay from the previous one, in hours — the single unit both
+// kinds of step can be scheduled on.
+export function stepDelayHours(step: SequenceStep): number {
+  return (step.delay_days || 0) * 24 + (step.delay_hours || 0);
+}
+
+// Cumulative offset from launch to the end of step `index`.
+export function offsetHoursThrough(steps: SequenceStep[], index: number): number {
+  return steps.slice(0, index + 1).reduce((sum, s) => sum + stepDelayHours(s), 0);
+}
+
+export function describeDelay(step: SequenceStep): string {
+  const days = step.delay_days || 0;
+  const hours = step.delay_hours || 0;
+  if (!days && !hours) return "immediately";
+  const parts: string[] = [];
+  if (days) parts.push(`${days} ${days === 1 ? "day" : "days"}`);
+  if (hours) parts.push(`${hours} ${hours === 1 ? "hour" : "hours"}`);
+  return parts.join(" ");
+}
+
+// A step is only ready to launch when the fields its own kind needs are
+// filled in — a call has no subject line to check.
+export function isStepComplete(step: SequenceStep): boolean {
+  return stepType(step) === "call"
+    ? !!step.title?.trim()
+    : !!step.subject.trim() && !!step.body.trim();
 }
 
 // A vertical is the industry a sequence was written for. Copy that
@@ -327,12 +373,6 @@ export function presetsForVertical(verticalKey: string): SequencePreset[] {
 }
 
 export function totalDays(steps: SequenceStep[]): number {
-  return steps.reduce((sum, s) => sum + (s.delay_days || 0), 0);
+  return Math.round(steps.reduce((sum, s) => sum + stepDelayHours(s), 0) / 24);
 }
 
-export function calculateScheduledDate(prevDelays: number[]): Date {
-  const totalDays = prevDelays.reduce((sum, d) => sum + (d || 0), 0);
-  const date = new Date();
-  date.setDate(date.getDate() + totalDays);
-  return date;
-}

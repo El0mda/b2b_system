@@ -18,7 +18,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { SequenceStepList } from "@/components/sequence/step-editor";
-import { BUILTIN_VERTICALS } from "@/lib/sequence-presets";
+import { BUILTIN_VERTICALS, isStepComplete, stepDelayHours, stepType } from "@/lib/sequence-presets";
 import {
   BUILTIN_PREFIX,
   orgVerticalId,
@@ -120,10 +120,12 @@ export function StepSequences({
     toast.success("Saved to your sequence library");
   };
 
-  const totalDelayDays = state.sequenceSteps.reduce((sum, s) => sum + (s.delay_days || 0), 0);
+  const totalDelayDays = Math.round(
+    state.sequenceSteps.reduce((sum, s) => sum + stepDelayHours(s), 0) / 24,
+  );
+  const callSteps = state.sequenceSteps.filter((s) => stepType(s) === "call").length;
   const canContinue =
-    state.sequenceSteps.length > 0 &&
-    state.sequenceSteps.every((s) => s.subject.trim() && s.body.trim());
+    state.sequenceSteps.length > 0 && state.sequenceSteps.every(isStepComplete);
 
   const selectedVertical = verticalChoices.find((v) => v.key === verticalKey);
   const selectedTemplate = templateChoices.find((t) => t.key === state.presetKey);
@@ -185,6 +187,15 @@ export function StepSequences({
             <span>
               <strong className="text-foreground">{totalDelayDays}</strong> total days
             </span>
+            {callSteps > 0 && (
+              <>
+                <span>·</span>
+                <span>
+                  <strong className="text-foreground">{callSteps}</strong> call{" "}
+                  {callSteps === 1 ? "task" : "tasks"} per lead
+                </span>
+              </>
+            )}
             <Button
               variant="outline"
               size="sm"
