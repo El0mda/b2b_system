@@ -62,7 +62,8 @@ import {
   DialogDescription,
   DialogFooter,
 } from "@/components/ui/dialog";
-import { cn } from "@/lib/utils";
+import { cn, getFunctionErrorMessage } from "@/lib/utils";
+import { parseMedia } from "@/lib/email-media";
 
 type Tab = "overview" | "leads" | "sequences" | "performance" | "activity";
 
@@ -125,6 +126,7 @@ interface SequenceStep {
   body: string | null;
   title: string | null;
   notes: string | null;
+  attachments: unknown;
   created_at: string | null;
 }
 
@@ -232,7 +234,9 @@ export default function CampaignDetailPage() {
       const { data, error } = await supabase.functions.invoke("campaign-action", {
         body: { campaign_id: id, action: status },
       });
-      if (error) throw error;
+      // The real reason lives in the response body — supabase-js's own
+      // message is only ever "non-2xx status code".
+      if (error) throw new Error(await getFunctionErrorMessage(error));
       if (data?.error) throw new Error(data.error);
     },
     onSuccess: (_data, status) => {
@@ -251,7 +255,9 @@ export default function CampaignDetailPage() {
       const { data, error } = await supabase.functions.invoke("smartlead-sync", {
         body: { campaign_id: id },
       });
-      if (error) throw error;
+      // The real reason lives in the response body — supabase-js's own
+      // message is only ever "non-2xx status code".
+      if (error) throw new Error(await getFunctionErrorMessage(error));
       if (data?.error) throw new Error(data.error);
     },
     onSuccess: () => {
@@ -267,7 +273,9 @@ export default function CampaignDetailPage() {
       const { data, error } = await supabase.functions.invoke("campaign-action", {
         body: { campaign_id: id, action: "delete" },
       });
-      if (error) throw error;
+      // The real reason lives in the response body — supabase-js's own
+      // message is only ever "non-2xx status code".
+      if (error) throw new Error(await getFunctionErrorMessage(error));
       if (data?.error) throw new Error(data.error);
     },
     onSuccess: () => {
@@ -872,6 +880,31 @@ function TabSequences({ sequences }: { sequences: SequenceStep[] }) {
                   {isCall ? s.notes || "(no call script)" : s.body || "(no body)"}
                 </pre>
               </div>
+              {!isCall && parseMedia(s.attachments).length > 0 && (
+                <div className="flex flex-wrap gap-2">
+                  {parseMedia(s.attachments).map((m, j) => (
+                    <a
+                      key={j}
+                      href={m.url}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="relative block"
+                      title={m.name}
+                    >
+                      <img
+                        src={m.kind === "video" ? (m.poster_url ?? "") : m.url}
+                        alt={m.name}
+                        className="h-20 w-32 rounded-md border border-border object-cover"
+                      />
+                      {m.kind === "video" && (
+                        <span className="absolute bottom-1 left-1 rounded bg-black/60 px-1.5 text-[10px] text-white">
+                          Video
+                        </span>
+                      )}
+                    </a>
+                  ))}
+                </div>
+              )}
             </CardContent>
           </Card>
         );

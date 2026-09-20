@@ -36,6 +36,7 @@ interface SequenceRow {
   delay_hours: number | null;
   subject: string | null;
   body: string | null;
+  attachments: unknown;
 }
 
 const SMARTLEAD_API = "https://server.smartlead.ai/api/v1";
@@ -43,7 +44,35 @@ const SMARTLEAD_API = "https://server.smartlead.ai/api/v1";
 interface EmailStep {
   subject: string;
   body: string;
+  mediaHtml: string;
   delayDays: number;
+}
+
+// Photos and videos stored on the step (see migration 0019). SmartLead's
+// sequence API has no attachment field, so they're embedded as hosted
+// media: photos inline, videos as a clickable poster frame (generated
+// in the browser at upload time — see src/lib/email-media.ts).
+function escapeAttr(value: string): string {
+  return value.replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;");
+}
+
+function renderMediaHtml(value: unknown): string {
+  if (!Array.isArray(value)) return "";
+  return value
+    .map((raw: any) => {
+      if (!raw || typeof raw.url !== "string") return "";
+      const url = escapeAttr(raw.url);
+      const name = escapeAttr(typeof raw.name === "string" ? raw.name : "attachment");
+      if (raw.kind === "image") {
+        return `<p style="margin:16px 0"><img src="${url}" alt="${name}" width="560" style="display:block;max-width:100%;height:auto;border:0;border-radius:6px"></p>`;
+      }
+      if (raw.kind !== "video") return "";
+      const poster = typeof raw.poster_url === "string"
+        ? `<a href="${url}" target="_blank"><img src="${escapeAttr(raw.poster_url)}" alt="Watch: ${name}" width="560" style="display:block;max-width:100%;height:auto;border:0;border-radius:6px"></a>`
+        : "";
+      return `<p style="margin:16px 0">${poster}<a href="${url}" target="_blank" style="display:inline-block;margin-top:6px">&#9654; Watch the video</a></p>`;
+    })
+    .join("");
 }
 
 // Drops call steps from the sequence while preserving the cadence:
@@ -62,6 +91,7 @@ function buildEmailSteps(rows: SequenceRow[]): EmailStep[] {
     out.push({
       subject: row.subject ?? "",
       body: row.body ?? "",
+      mediaHtml: renderMediaHtml(row.attachments),
       delayDays: Math.round((hours + carriedHours) / 24),
     });
     carriedHours = 0;
@@ -177,7 +207,7 @@ Deno.serve(async (req) => {
     // 3. Fetch sequences
     const { data: sequences, error: sequencesError } = await userClient
       .from("sequences")
-      .select("step, step_type, delay_days, delay_hours, subject, body")
+      .select("step, step_type, delay_days, delay_hours, subject, body, attachments")
       .eq("campaign_id", campaign_id)
       .order("step", { ascending: true });
     if (sequencesError) return json({ error: sequencesError.message }, 500);
@@ -227,7 +257,9 @@ Deno.serve(async (req) => {
         seq_number: i + 1,
         seq_delay_details: { delay_in_days: s.delayDays },
         subject: toSmartleadVars(s.subject),
-        email_body: toSmartleadVars(s.body).replace(/\n/g, "<br>"),
+        // Media goes after the newline conversion: its markup must reach
+        // SmartLead untouched, with no <br> spliced into attributes.
+        email_body: toSmartleadVars(s.body).replace(/\n/g, "<br>") + s.mediaHtml,
       })),
     };
     const seqRes = await smartleadFetch(

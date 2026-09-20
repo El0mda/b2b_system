@@ -7,6 +7,12 @@
 //   - "delete"  -> delete the SmartLead campaign, then delete the local row
 //     (leads/sequences cascade via FK)
 //
+// A delete that SmartLead refuses is reported rather than swallowed: the
+// remote campaign would otherwise keep sending mail with nothing in this
+// app pointing at it. `force: true` overrides that after the user has
+// been shown why — the local row goes regardless, and the response says
+// the SmartLead campaign was left behind.
+//
 // A campaign that was never launched (no smartlead_campaign_id yet) only
 // touches the local row — there's nothing remote to sync.
 //
@@ -43,7 +49,7 @@ Deno.serve(async (req) => {
     const smartleadKey = Deno.env.get("SMARTLEAD_API_KEY");
     if (!supabaseUrl) return json({ error: "Supabase env vars missing" }, 500);
 
-    const { campaign_id, action } = await req.json();
+    const { campaign_id, action, force } = await req.json();
     if (!campaign_id) return json({ error: "campaign_id is required" }, 400);
     if (!["draft", "active", "delete"].includes(action)) {
       return json({ error: `Unknown action: ${action}` }, 400);
@@ -65,18 +71,31 @@ Deno.serve(async (req) => {
     }
 
     const slId = (campaign as any).smartlead_campaign_id as string | null;
+    let smartleadWarning: string | null = null;
 
     if (slId && smartleadKey) {
       if (action === "delete") {
         const res = await smartleadFetch(`/campaigns/${slId}`, smartleadKey, {
           method: "DELETE",
         });
+        // 404 means it's already gone on their side, which is the state
+        // we were trying to reach anyway.
         if (!res.ok && res.status !== 404) {
           const text = await res.text();
-          return json(
-            { error: `SmartLead delete failed (${res.status}): ${text.slice(0, 300)}` },
-            502,
-          );
+          const detail = `SmartLead delete failed (${res.status}): ${text.slice(0, 300)}`;
+          if (!force) {
+            return json(
+              {
+                error: detail,
+                // Tells the app it can offer a local-only delete rather
+                // than leaving the user with a row they can never remove.
+                smartlead_blocked: true,
+              },
+              502,
+            );
+          }
+          console.error(`Forced delete of campaign ${campaign_id}: ${detail}`);
+          smartleadWarning = detail;
         }
       } else {
         const status = action === "active" ? "START" : "PAUSED";
@@ -139,7 +158,13 @@ Deno.serve(async (req) => {
       console.error("activity log failed:", e);
     }
 
-    return json({ ok: true, synced_to_smartlead: !!slId });
+    return json({
+      ok: true,
+      synced_to_smartlead: !!slId,
+      // Set only on a forced delete: the local row is gone but the
+      // SmartLead campaign is still there and may still be sending.
+      smartlead_warning: smartleadWarning,
+    });
   } catch (e: any) {
     return json({ error: e?.message ?? String(e) }, 500);
   }

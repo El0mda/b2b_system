@@ -41,7 +41,7 @@ import {
   DialogDescription,
   DialogFooter,
 } from "@/components/ui/dialog";
-import { cn } from "@/lib/utils";
+import { cn, getFunctionErrorDetail } from "@/lib/utils";
 
 const STATUS_OPTIONS = ["all", "draft", "searching", "enriching", "active", "paused", "completed"];
 
@@ -81,6 +81,9 @@ export default function CampaignsPage() {
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
   const [pendingDelete, setPendingDelete] = useState<CampaignRow | null>(null);
+  // Set when SmartLead refused the remote delete, so the dialog can
+  // explain why and offer a local-only delete instead of dead-ending.
+  const [deleteBlocked, setDeleteBlocked] = useState<string | null>(null);
 
   const { data: campaigns = [], isLoading } = useQuery<CampaignRow[]>({
     queryKey: ["campaigns", orgId],
@@ -129,7 +132,9 @@ export default function CampaignsPage() {
       const { data, error } = await supabase.functions.invoke("campaign-action", {
         body: { campaign_id: id, action: status },
       });
-      if (error) throw error;
+      // The real reason lives in the response body — supabase-js's own
+      // message is only ever "non-2xx status code".
+      if (error) throw new Error((await getFunctionErrorDetail(error)).message);
       if (data?.error) throw new Error(data.error);
     },
     onSuccess: (_data, { status }) => {
@@ -142,19 +147,39 @@ export default function CampaignsPage() {
   });
 
   const deleteCampaign = useMutation({
-    mutationFn: async (id: string) => {
+    mutationFn: async ({ id, force }: { id: string; force?: boolean }) => {
       const { data, error } = await supabase.functions.invoke("campaign-action", {
-        body: { campaign_id: id, action: "delete" },
+        body: { campaign_id: id, action: "delete", force: !!force },
       });
-      if (error) throw error;
+      // The real reason lives in the response body — supabase-js's own
+      // message is only ever "non-2xx status code".
+      if (error) {
+        const detail = await getFunctionErrorDetail(error);
+        const err = new Error(detail.message);
+        (err as any).smartleadBlocked = detail.smartleadBlocked;
+        throw err;
+      }
       if (data?.error) throw new Error(data.error);
+      return data as { smartlead_warning?: string | null };
     },
-    onSuccess: () => {
+    onSuccess: (data) => {
       qc.invalidateQueries({ queryKey: ["campaigns", orgId] });
-      toast.success("Campaign deleted");
+      if (data?.smartlead_warning) {
+        toast.warning("Deleted here — the SmartLead campaign is still there and may still send.");
+      } else {
+        toast.success("Campaign deleted");
+      }
       setPendingDelete(null);
+      setDeleteBlocked(null);
     },
-    onError: (e: any) => toast.error(e?.message || "Could not delete campaign"),
+    onError: (e: any) => {
+      if (e?.smartleadBlocked) {
+        // Keep the dialog open: there's a second option to offer.
+        setDeleteBlocked(e.message);
+        return;
+      }
+      toast.error(e?.message || "Could not delete campaign");
+    },
   });
 
   if (isLoading) return <FullPageSpinner />;
@@ -360,7 +385,13 @@ export default function CampaignsPage() {
         </CardContent>
       </Card>
 
-      <Dialog open={!!pendingDelete} onClose={() => setPendingDelete(null)}>
+      <Dialog
+        open={!!pendingDelete}
+        onClose={() => {
+          setPendingDelete(null);
+          setDeleteBlocked(null);
+        }}
+      >
         <DialogHeader>
           <DialogTitle>Delete campaign?</DialogTitle>
           <DialogDescription>
@@ -368,18 +399,49 @@ export default function CampaignsPage() {
             activity. This can't be undone.
           </DialogDescription>
         </DialogHeader>
+
+        {deleteBlocked && (
+          <div className="space-y-2 rounded-lg border border-destructive/30 bg-destructive/5 p-3 text-sm">
+            <p className="font-medium text-destructive">SmartLead wouldn't delete its copy</p>
+            <p className="text-xs text-muted-foreground">{deleteBlocked}</p>
+            <p className="text-xs text-muted-foreground">
+              You can still remove it here, but the SmartLead campaign will be left behind — pause
+              or delete it there too, or it may keep sending.
+            </p>
+          </div>
+        )}
+
         <DialogFooter>
-          <Button variant="outline" onClick={() => setPendingDelete(null)}>
+          <Button
+            variant="outline"
+            onClick={() => {
+              setPendingDelete(null);
+              setDeleteBlocked(null);
+            }}
+          >
             Cancel
           </Button>
-          <Button
-            variant="destructive"
-            disabled={deleteCampaign.isPending}
-            onClick={() => pendingDelete && deleteCampaign.mutate(pendingDelete.id)}
-          >
-            {deleteCampaign.isPending && <Spinner />}
-            Delete campaign
-          </Button>
+          {deleteBlocked ? (
+            <Button
+              variant="destructive"
+              disabled={deleteCampaign.isPending}
+              onClick={() =>
+                pendingDelete && deleteCampaign.mutate({ id: pendingDelete.id, force: true })
+              }
+            >
+              {deleteCampaign.isPending && <Spinner />}
+              Delete here anyway
+            </Button>
+          ) : (
+            <Button
+              variant="destructive"
+              disabled={deleteCampaign.isPending}
+              onClick={() => pendingDelete && deleteCampaign.mutate({ id: pendingDelete.id })}
+            >
+              {deleteCampaign.isPending && <Spinner />}
+              Delete campaign
+            </Button>
+          )}
         </DialogFooter>
       </Dialog>
     </div>

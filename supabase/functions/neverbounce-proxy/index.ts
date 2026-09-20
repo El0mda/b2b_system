@@ -1,5 +1,10 @@
 // Supabase Edge Function: neverbounce-proxy
 //
+// UNUSED as of the switch to SmartLead verification — nothing in the app
+// calls this any more (see supabase/functions/emailable-verify). Kept so
+// the NeverBounce path can be restored without rewriting it; safe to
+// delete along with the NEVERBOUNCE_API_KEY secret once you're sure.
+//
 // Proxies NeverBounce email verification using shared API key from env.
 //
 // Actions: verify (POST with { email })

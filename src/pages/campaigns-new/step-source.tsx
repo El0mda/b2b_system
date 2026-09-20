@@ -25,6 +25,7 @@ import {
 } from "lucide-react";
 
 import { supabase } from "@/lib/supabase";
+import { lookupVerification, verifyEmails } from "@/lib/verify-emails";
 import { useAuth } from "@/hooks/use-auth";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -466,46 +467,42 @@ function LushaTab({
       }
 
       const prospectMap = new Map(prospects.map((p) => [p.contactId, p]));
-      const enriched: WizardLead[] = await Promise.all(
-        enrichedContacts.map(async (c: any) => {
-          const d = c.data ?? c;
-          const p = prospectMap.get(c.id ?? c.contactId);
-          const email = d.emailAddresses?.[0]?.email ?? d.emailAddresses?.[0]?.address ?? "";
-          const phone = d.phoneNumbers?.[0]?.number ?? "";
-          let nb_result: string | null = null;
-          let email_valid: boolean | null = null;
-          if (email) {
-            try {
-              const { data: nbData } = await supabase.functions.invoke(
-                "neverbounce-proxy",
-                { body: { action: "verify", email } },
-              );
-              if (nbData?.nb_result) {
-                nb_result = nbData.nb_result;
-                email_valid = nbData.email_valid;
-              }
-            } catch {}
-          }
-          const fullName = p?.fullName ?? d.fullName ?? "";
-          return {
-            id: p?.contactId ?? c.id ?? c.contactId ?? undefined,
-            email: email || `${fullName.replace(/\s+/g, ".")}@unknown.com`,
-            first_name: p?.firstName ?? d.firstName ?? "",
-            last_name: p?.lastName ?? d.lastName ?? "",
-            full_name: fullName,
-            company: p?.company ?? d.companyName ?? d.company?.name ?? "",
-            job_title: p?.jobTitle ?? d.jobTitle ?? "",
-            phone: phone || undefined,
-            location: p?.location ?? (d.location ? `${d.location.city ?? ""} ${d.location.state ?? ""} ${d.location.country ?? ""}`.trim() : ""),
-            linkedin_url: p?.linkedinUrl ?? d.socialLinks?.linkedin ?? "",
-            website: p?.website ?? d.company?.fqdn ?? "",
-            nb_result,
-            email_valid,
-            has_work_email: !!email,
-            has_phones: !!phone,
-          };
-        }),
+      const mapped: WizardLead[] = enrichedContacts.map((c: any) => {
+        const d = c.data ?? c;
+        const p = prospectMap.get(c.id ?? c.contactId);
+        const email = d.emailAddresses?.[0]?.email ?? d.emailAddresses?.[0]?.address ?? "";
+        const phone = d.phoneNumbers?.[0]?.number ?? "";
+        const fullName = p?.fullName ?? d.fullName ?? "";
+        return {
+          id: p?.contactId ?? c.id ?? c.contactId ?? undefined,
+          email: email || `${fullName.replace(/\s+/g, ".")}@unknown.com`,
+          first_name: p?.firstName ?? d.firstName ?? "",
+          last_name: p?.lastName ?? d.lastName ?? "",
+          full_name: fullName,
+          company: p?.company ?? d.companyName ?? d.company?.name ?? "",
+          job_title: p?.jobTitle ?? d.jobTitle ?? "",
+          phone: phone || undefined,
+          location: p?.location ?? (d.location ? `${d.location.city ?? ""} ${d.location.state ?? ""} ${d.location.country ?? ""}`.trim() : ""),
+          linkedin_url: p?.linkedinUrl ?? d.socialLinks?.linkedin ?? "",
+          website: p?.website ?? d.company?.fqdn ?? "",
+          nb_result: null,
+          email_valid: null,
+          has_work_email: !!email,
+          has_phones: !!phone,
+        };
+      });
+
+      // Only real addresses are verified — the placeholder built above
+      // for a contact with no email would burn a credit to prove itself
+      // undeliverable.
+      const verification = await verifyEmails(
+        mapped.filter((l) => l.has_work_email).map((l) => l.email),
       );
+      const enriched: WizardLead[] = mapped.map((l) => {
+        if (!l.has_work_email) return l;
+        const v = lookupVerification(verification, l.email);
+        return { ...l, nb_result: v.result, email_valid: v.valid };
+      });
 
       setState((p) => ({
         ...p,
@@ -1383,31 +1380,15 @@ function ImportTab({
       return;
     }
 
-    // Run NeverBounce if enabled
+    // Verify through Emailable, batched (see src/lib/verify-emails.ts)
     if (verify) {
       setVerifying(true);
       try {
-        const verified = await Promise.all(
-          leads.map(async (l) => {
-            try {
-              const { data, error } = await supabase.functions.invoke(
-                "neverbounce-proxy",
-                {
-                  body: { action: "verify", email: l.email },
-                },
-              );
-              if (!error && data?.nb_result) {
-                return {
-                  ...l,
-                  nb_result: data.nb_result,
-                  email_valid: data.email_valid,
-                };
-              }
-            } catch {}
-            return { ...l, nb_result: "skipped", email_valid: null };
-          }),
-        );
-        leads = verified;
+        const verification = await verifyEmails(leads.map((l) => l.email));
+        leads = leads.map((l) => {
+          const v = lookupVerification(verification, l.email);
+          return { ...l, nb_result: v.result, email_valid: v.valid };
+        });
       } catch {}
       setVerifying(false);
     }
@@ -1510,7 +1491,7 @@ function ImportTab({
                   <TableHead>Company</TableHead>
                   <TableHead>Title</TableHead>
                   <TableHead>Phone</TableHead>
-                  <TableHead>NB Status</TableHead>
+                  <TableHead>Email Status</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -1628,7 +1609,7 @@ function ImportTab({
             />
             <ToggleRow
               label="Verify emails"
-              hint="Run NeverBounce on each email during import."
+              hint="Check each address with Emailable during import (uses verification credits)."
               checked={verify}
               onChange={setVerify}
             />

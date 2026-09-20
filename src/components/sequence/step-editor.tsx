@@ -2,7 +2,9 @@
 // Sequences library page — both edit the exact same shape, and a
 // template that behaved differently from the campaign it seeds would be
 // a trap.
-import { Plus, Trash2, Mail, PhoneCall } from "lucide-react";
+import { useRef, useState } from "react";
+import { Plus, Trash2, Mail, PhoneCall, ImagePlus, Film, X, Loader2 } from "lucide-react";
+import { toast } from "sonner";
 
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -10,6 +12,15 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { PERSONALIZATION_TOKENS } from "@/lib/template";
+import { useAuth } from "@/hooks/use-auth";
+import {
+  IMAGE_TYPES,
+  VIDEO_TYPES,
+  formatBytes,
+  uploadEmailMedia,
+  validateMediaFile,
+  type EmailMedia,
+} from "@/lib/email-media";
 import { describeDelay, stepType, type SequenceStep } from "@/lib/sequence-presets";
 
 export function SequenceStepList({
@@ -224,6 +235,11 @@ function SequenceStepCard({
               />
               <ChipRow onInsert={(t) => insertToken("body", t)} />
             </div>
+
+            <MediaPicker
+              media={step.attachments ?? []}
+              onChange={(attachments) => onChange({ attachments })}
+            />
           </>
         )}
       </CardContent>
@@ -246,6 +262,129 @@ function ChipRow({ onInsert }: { onInsert: (token: string) => void }) {
           {"}}"}
         </button>
       ))}
+    </div>
+  );
+}
+
+// Photos and videos for an email step. They're uploaded straight away
+// (to the public email-media bucket) and embedded below the body when
+// the email goes out — SmartLead has no attachment support, so hosted
+// media is the only way to get them into the message.
+function MediaPicker({
+  media,
+  onChange,
+}: {
+  media: EmailMedia[];
+  onChange: (media: EmailMedia[]) => void;
+}) {
+  const { organization } = useAuth();
+  const inputRef = useRef<HTMLInputElement>(null);
+  const [uploading, setUploading] = useState<string[]>([]);
+
+  const handleFiles = async (files: FileList | null) => {
+    if (!files || files.length === 0 || !organization?.id) return;
+    const picked = Array.from(files);
+
+    // Reject bad files up front, before anything starts uploading.
+    const valid = picked.filter((file) => {
+      const problem = validateMediaFile(file);
+      if (problem) toast.error(problem);
+      return !problem;
+    });
+    if (valid.length === 0) return;
+
+    setUploading((u) => [...u, ...valid.map((f) => f.name)]);
+    const added: EmailMedia[] = [];
+    for (const file of valid) {
+      try {
+        const uploaded = await uploadEmailMedia(organization.id, file);
+        added.push(uploaded);
+        if (uploaded.kind === "video" && !uploaded.poster_url) {
+          toast.warning(`${file.name}: no thumbnail — the email will show a "Watch the video" link.`);
+        }
+      } catch (e: any) {
+        toast.error(`${file.name}: ${e?.message || "upload failed"}`);
+      } finally {
+        setUploading((u) => u.filter((n) => n !== file.name));
+      }
+    }
+    // Appended in one go so concurrent uploads can't overwrite each other.
+    if (added.length > 0) onChange([...media, ...added]);
+  };
+
+  const remove = (index: number) => onChange(media.filter((_, i) => i !== index));
+
+  return (
+    <div className="space-y-2">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <Label>Photos &amp; videos (optional)</Label>
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          disabled={uploading.length > 0}
+          onClick={() => inputRef.current?.click()}
+        >
+          {uploading.length > 0 ? (
+            <Loader2 className="h-3.5 w-3.5 animate-spin" />
+          ) : (
+            <ImagePlus className="h-3.5 w-3.5" />
+          )}
+          {uploading.length > 0 ? `Uploading ${uploading.length}…` : "Add photo or video"}
+        </Button>
+        <input
+          ref={inputRef}
+          type="file"
+          multiple
+          accept={[...IMAGE_TYPES, ...VIDEO_TYPES].join(",")}
+          className="hidden"
+          onChange={(e) => {
+            handleFiles(e.target.files);
+            // Reset so picking the same file again still fires onChange.
+            e.target.value = "";
+          }}
+        />
+      </div>
+
+      {media.length > 0 && (
+        <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+          {media.map((m, i) => (
+            <div
+              key={`${m.url}-${i}`}
+              className="group relative overflow-hidden rounded-md border border-border bg-muted/30"
+            >
+              <img
+                src={m.kind === "video" ? (m.poster_url ?? "") : m.url}
+                alt={m.name}
+                className="aspect-video w-full object-cover"
+                onError={(e) => ((e.target as HTMLImageElement).style.visibility = "hidden")}
+              />
+              {m.kind === "video" && !m.poster_url && (
+                <Film className="absolute inset-0 m-auto h-6 w-6 text-muted-foreground" />
+              )}
+              <div className="flex items-center gap-1 px-2 py-1 text-[11px] text-muted-foreground">
+                {m.kind === "video" ? <Film className="h-3 w-3 shrink-0" /> : null}
+                <span className="truncate">{m.name}</span>
+                <span className="ml-auto shrink-0">{formatBytes(m.size)}</span>
+              </div>
+              <button
+                type="button"
+                onClick={() => remove(i)}
+                aria-label={`Remove ${m.name}`}
+                className="absolute right-1 top-1 rounded-full bg-black/60 p-1 text-white opacity-0 transition-opacity group-hover:opacity-100 focus:opacity-100"
+              >
+                <X className="h-3 w-3" />
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+
+      <p className="text-xs text-muted-foreground">
+        Shown below the email text. Photos appear inline; videos appear as a thumbnail that opens
+        the video. Photos up to {formatBytes(5 * 1024 * 1024)}, videos up to{" "}
+        {formatBytes(50 * 1024 * 1024)}.
+      </p>
     </div>
   );
 }

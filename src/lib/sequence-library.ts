@@ -5,6 +5,7 @@
 import { useQuery } from "@tanstack/react-query";
 
 import { supabase } from "@/lib/supabase";
+import { parseMedia } from "@/lib/email-media";
 import {
   ANY_VERTICAL,
   BUILTIN_VERTICALS,
@@ -135,6 +136,7 @@ export function parseSteps(value: unknown): SequenceStep[] {
         body: typeof s.body === "string" ? s.body : "",
         title: typeof s.title === "string" ? s.title : undefined,
         notes: typeof s.notes === "string" ? s.notes : undefined,
+        attachments: parseMedia(s.attachments),
       };
     })
     .sort((a, b) => a.step - b.step);

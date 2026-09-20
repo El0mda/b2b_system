@@ -189,7 +189,7 @@ export default function LeadsPage() {
   const paged = filtered.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE);
 
   const handleExport = () => {
-    const headers = ["Name", "Email", "Company", "Title", "Campaign", "Source", "NB Status", "Engagement", "Reply", "Date"];
+    const headers = ["Name", "Email", "Company", "Title", "Campaign", "Source", "Email Status", "Engagement", "Reply", "Date"];
     const rows = filtered.map((l) => [
       l.full_name ?? `${l.first_name ?? ""} ${l.last_name ?? ""}`.trim(),
       l.email ?? "",
@@ -311,7 +311,7 @@ export default function LeadsPage() {
                   <Th>Title</Th>
                   <Th>Campaign</Th>
                   <Th>Source</Th>
-                  <Th>NB Status</Th>
+                  <Th>Email Status</Th>
                   <Th>Engagement</Th>
                   <Th>Reply</Th>
                   <Th>Date</Th>
@@ -556,7 +556,7 @@ function LeadSlideOver({
           <div className="space-y-3">
             <h4 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Email Status</h4>
             <div className="grid grid-cols-2 gap-3 text-sm">
-              <LeadInfo icon={CheckCircle2} label="NB Result" value={lead.nb_result ?? "Not run"} />
+              <LeadInfo icon={CheckCircle2} label="Verification" value={lead.nb_result ?? "Not run"} />
               <LeadInfo icon={AlertCircle} label="Valid" value={lead.email_valid === null ? "Unknown" : lead.email_valid ? "Yes" : "No"} />
               <LeadInfo icon={MailCheck} label="Delivered" value={lead.email_delivered ? "Yes" : "No"} />
               <LeadInfo icon={Eye} label="Opened" value={lead.email_opened ? "Yes" : "No"} />

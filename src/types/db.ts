@@ -679,6 +679,7 @@ export type Database = {
       }
       sequences: {
         Row: {
+          attachments: Json
           body: string | null
           campaign_id: string | null
           created_at: string | null
@@ -692,6 +693,7 @@ export type Database = {
           title: string | null
         }
         Insert: {
+          attachments?: Json
           body?: string | null
           campaign_id?: string | null
           created_at?: string | null
@@ -705,6 +707,7 @@ export type Database = {
           title?: string | null
         }
         Update: {
+          attachments?: Json
           body?: string | null
           campaign_id?: string | null
           created_at?: string | null

@@ -1,3 +1,5 @@
+import type { EmailMedia } from "@/lib/email-media";
+
 // A step is either an email SmartLead sends, or a call somebody on the
 // team has to make. `type` is optional because every template written
 // before call steps existed is an email step, and rewriting stored
@@ -16,6 +18,8 @@ export interface SequenceStep {
   // Call steps only: what the task says, and the script to work from.
   title?: string;
   notes?: string;
+  // Email steps only: photos/videos embedded below the body.
+  attachments?: EmailMedia[];
 }
 
 export function stepType(step: SequenceStep): SequenceStepType {

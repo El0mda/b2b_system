@@ -17,6 +17,12 @@ import {
 import { format } from "date-fns";
 
 import { supabase } from "@/lib/supabase";
+import {
+  UNVERIFIED,
+  lookupVerification,
+  verifyEmails,
+  type VerificationMap,
+} from "@/lib/verify-emails";
 import { useAuth } from "@/hooks/use-auth";
 import { logActivity } from "@/lib/activity";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -552,8 +558,8 @@ function ConfigureStep({
           <div>
             <div className="text-sm font-medium">Verify emails</div>
             <p className="mt-1 text-xs text-muted-foreground">
-              Run NeverBounce verification on all imported emails. Requires a NeverBounce key in
-              Settings. May skip silently if browser CORS blocks the request.
+              Check every imported address with Emailable before it's saved. Uses one
+              Emailable credit per address.
             </p>
           </div>
           <Switch checked={verify} onCheckedChange={setVerify} />
@@ -841,19 +847,10 @@ async function runImport(opts: {
     });
   }
 
-  // 4. Verify emails via NeverBounce (via proxy)
-  const verifyEmail = async (email: string) => {
-    if (!verify) return { result: null as string | null, valid: null as boolean | null };
-    try {
-      const { data, error } = await supabase.functions.invoke("neverbounce-proxy", {
-        body: { action: "verify", email },
-      });
-      if (error || !data?.nb_result) return { result: "skipped", valid: null };
-      return { result: data.nb_result, valid: data.email_valid };
-    } catch {
-      return { result: "skipped", valid: null };
-    }
-  };
+  // 4. Verify emails through Emailable, batched (see src/lib/verify-emails.ts).
+  const verification: VerificationMap = verify
+    ? await verifyEmails(toInsert.map((c) => c.email))
+    : new Map();
 
   // 5. Insert in chunks
   let imported = 0;
@@ -861,15 +858,10 @@ async function runImport(opts: {
   const BATCH = 100;
   for (let i = 0; i < toInsert.length; i += BATCH) {
     const slice = toInsert.slice(i, i + BATCH);
-    let enriched = slice.map((c) => ({ ...c, nb_result: null as string | null, email_valid: null as boolean | null }));
-    if (verify) {
-      enriched = await Promise.all(
-        slice.map(async (c) => {
-          const v = await verifyEmail(c.email);
-          return { ...c, nb_result: v.result, email_valid: v.valid };
-        }),
-      );
-    }
+    const enriched = slice.map((c) => {
+      const v = verify ? lookupVerification(verification, c.email) : UNVERIFIED;
+      return { ...c, nb_result: v.result, email_valid: v.valid };
+    });
     const rows = enriched.map((c) => ({
       org_id: orgId,
       campaign_id: campaignId,

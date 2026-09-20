@@ -93,7 +93,7 @@ export function StepReview({
                   <TableHead>Company</TableHead>
                   <TableHead>Title</TableHead>
                   <TableHead>Phone</TableHead>
-                  <TableHead>NB Status</TableHead>
+                  <TableHead>Email Status</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>

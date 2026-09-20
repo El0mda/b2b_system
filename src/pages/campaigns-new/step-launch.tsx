@@ -209,6 +209,7 @@ export function StepLaunch({
         body: stepType(s) === "call" ? null : s.body,
         title: stepType(s) === "call" ? (s.title ?? "Call the lead") : null,
         notes: stepType(s) === "call" ? (s.notes ?? null) : null,
+        attachments: stepType(s) === "call" ? [] : (s.attachments ?? []),
       }));
       const { data: insertedSequences, error: seqError } = await supabase
         .from("sequences")
@@ -401,6 +402,24 @@ export function StepLaunch({
                     ? processTemplate(s.notes ?? "", previewLead) || "No call script"
                     : processTemplate(s.body, previewLead) || "(no body)"}
                 </p>
+                {!isCall && (s.attachments?.length ?? 0) > 0 && (
+                  <div className="mt-2 flex flex-wrap gap-2">
+                    {s.attachments!.map((m, j) => (
+                      <div key={j} className="relative">
+                        <img
+                          src={m.kind === "video" ? (m.poster_url ?? "") : m.url}
+                          alt={m.name}
+                          className="h-14 w-24 rounded border border-border object-cover"
+                        />
+                        {m.kind === "video" && (
+                          <span className="absolute bottom-0.5 left-0.5 rounded bg-black/60 px-1 text-[10px] text-white">
+                            Video
+                          </span>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
             );
           })}
