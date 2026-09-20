@@ -6,6 +6,7 @@ import { StepSource } from "./step-source";
 import { StepReview } from "./step-review";
 import { StepSequences } from "./step-sequences";
 import { StepLaunch } from "./step-launch";
+import { DEFAULT_SEND_SETTINGS } from "@/lib/campaign-settings";
 import { type WizardState, type WizardStepKey } from "./types";
 
 const INITIAL_STATE: WizardState = {
@@ -22,6 +23,7 @@ const INITIAL_STATE: WizardState = {
   verticalKey: "builtin:manufacturing",
   presetKey: "builtin:pain-point",
   campaignId: null,
+  sendSettings: DEFAULT_SEND_SETTINGS,
   lushaFilters: {
     company_name: "",
     industry: "",

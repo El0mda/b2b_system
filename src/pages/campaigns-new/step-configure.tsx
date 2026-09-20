@@ -14,6 +14,8 @@ import {
   useConnectedMailboxes,
   useSenderAccounts,
 } from "@/lib/sender-accounts";
+import { SendingSchedule } from "@/components/campaign/sending-schedule";
+import { validateSendSettings } from "@/lib/campaign-settings";
 import { TIMEZONES, type WizardState } from "./types";
 
 export function StepConfigure({
@@ -64,7 +66,9 @@ export function StepConfigure({
   // A campaign whose sender isn't connected in SmartLead is created but
   // never sends, so it's blocked here rather than failing silently later.
   const sendable = isSendable(connected, reachable, selected?.sender_email);
-  const canContinue = !!state.campaignName.trim() && !!selected && sendable;
+  const scheduleProblems = validateSendSettings(state.sendSettings);
+  const canContinue =
+    !!state.campaignName.trim() && !!selected && sendable && scheduleProblems.length === 0;
 
   return (
     <div className="space-y-6">
@@ -162,6 +166,12 @@ export function StepConfigure({
           </div>
         </CardContent>
       </Card>
+
+      <SendingSchedule
+        value={state.sendSettings}
+        onChange={(sendSettings) => setState((p) => ({ ...p, sendSettings }))}
+        mailboxDailyLimit={mailbox?.daily_limit ?? null}
+      />
 
       <div className="flex justify-end">
         <Button onClick={onNext} disabled={!canContinue}>

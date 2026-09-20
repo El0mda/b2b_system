@@ -1,4 +1,5 @@
 import type { SequenceStep } from "@/lib/sequence-presets";
+import type { CampaignSendSettings } from "@/lib/campaign-settings";
 
 export type WizardStepKey = "configure" | "source" | "review" | "sequences" | "launch";
 
@@ -65,6 +66,8 @@ export interface WizardState {
   verticalKey: string;
   presetKey: string;
   campaignId: string | null;
+  // When and how fast this campaign sends (see campaign-settings.ts).
+  sendSettings: CampaignSendSettings;
   lushaFilters: LushaFilters;
 }
 

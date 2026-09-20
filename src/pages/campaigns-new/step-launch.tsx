@@ -36,6 +36,7 @@ import {
   stepType,
   type SequenceStep,
 } from "@/lib/sequence-presets";
+import { describeDays } from "@/lib/campaign-settings";
 import { cn, getFunctionErrorMessage } from "@/lib/utils";
 import type { Database } from "@/types/db";
 import type { WizardState } from "./types";
@@ -159,6 +160,8 @@ export function StepLaunch({
           sender_name: state.sender_name ?? "",
           reply_to_email: state.reply_to_email || state.sender_email,
           timezone: state.timezone,
+          // Read back by send-campaign when it schedules in SmartLead.
+          send_settings: { ...state.sendSettings },
           leads_added: newLeads.length,
           leads_searched: leadsSearched,
           leads_enriched: leadsEnriched,
@@ -326,6 +329,10 @@ export function StepLaunch({
             }
           />
           <SummaryRow label="Timezone" value={state.timezone} />
+          <SummaryRow
+            label="Schedule"
+            value={`${describeDays(state.sendSettings.days)} ${state.sendSettings.startHour}–${state.sendSettings.endHour} · ${state.sendSettings.minGapMinutes} min apart · ${state.sendSettings.maxLeadsPerDay}/day`}
+          />
           <SummaryRow label="Leads" value={String(selectedLeads.length)} />
           <SummaryRow label="Sequence steps" value={String(state.sequenceSteps.length)} />
           <SummaryRow label="Total duration" value={`${totalDays} days`} />

@@ -174,6 +174,7 @@ export type Database = {
       }
       campaigns: {
         Row: {
+          send_settings: Json
           created_at: string | null
           created_by: string | null
           filters: Json | null
@@ -197,6 +198,7 @@ export type Database = {
           updated_at: string | null
         }
         Insert: {
+          send_settings?: Json
           created_at?: string | null
           created_by?: string | null
           filters?: Json | null
@@ -220,6 +222,7 @@ export type Database = {
           updated_at?: string | null
         }
         Update: {
+          send_settings?: Json
           created_at?: string | null
           created_by?: string | null
           filters?: Json | null

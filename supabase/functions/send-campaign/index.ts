@@ -41,6 +41,42 @@ interface SequenceRow {
 
 const SMARTLEAD_API = "https://server.smartlead.ai/api/v1";
 
+// When and how fast this campaign may send. Mirrors the defaults in
+// src/lib/campaign-settings.ts — a campaign created before that column
+// existed has {} and falls back to these.
+interface SendSettings {
+  days: number[];
+  startHour: string;
+  endHour: string;
+  minGapMinutes: number;
+  maxLeadsPerDay: number;
+  trackOpens: boolean;
+  trackClicks: boolean;
+  stopOnReply: boolean;
+  plainText: boolean;
+}
+
+const HHMM = /^([01]\d|2[0-3]):([0-5]\d)$/;
+
+function parseSendSettings(value: any): SendSettings {
+  const v = (value ?? {}) as Record<string, any>;
+  const days = Array.isArray(v.days)
+    ? v.days.filter((n: any) => typeof n === "number" && n >= 0 && n <= 6)
+    : [];
+  return {
+    days: days.length > 0 ? days : [1, 2, 3, 4, 5],
+    startHour: typeof v.startHour === "string" && HHMM.test(v.startHour) ? v.startHour : "09:00",
+    endHour: typeof v.endHour === "string" && HHMM.test(v.endHour) ? v.endHour : "17:00",
+    minGapMinutes: typeof v.minGapMinutes === "number" && v.minGapMinutes > 0 ? v.minGapMinutes : 15,
+    maxLeadsPerDay:
+      typeof v.maxLeadsPerDay === "number" && v.maxLeadsPerDay > 0 ? v.maxLeadsPerDay : 25,
+    trackOpens: typeof v.trackOpens === "boolean" ? v.trackOpens : true,
+    trackClicks: typeof v.trackClicks === "boolean" ? v.trackClicks : true,
+    stopOnReply: typeof v.stopOnReply === "boolean" ? v.stopOnReply : true,
+    plainText: typeof v.plainText === "boolean" ? v.plainText : false,
+  };
+}
+
 interface EmailStep {
   subject: string;
   body: string;
@@ -183,7 +219,7 @@ Deno.serve(async (req) => {
     const { data: campaign, error: campaignError } = await userClient
       .from("campaigns")
       .select(
-        "id, org_id, name, sender_name, sender_email, reply_to_email, timezone, status",
+        "id, org_id, name, sender_name, sender_email, reply_to_email, timezone, status, send_settings",
       )
       .eq("id", campaign_id)
       .maybeSingle();
@@ -389,6 +425,8 @@ Deno.serve(async (req) => {
       console.warn(senderWarning);
     }
 
+    const sendSettings = parseSendSettings((campaign as any).send_settings);
+
     // ── Step E: Update campaign settings ──
     const settingsRes = await smartleadFetch(
       `/campaigns/${slCampaignId}/settings`,
@@ -396,9 +434,14 @@ Deno.serve(async (req) => {
       {
         method: "POST",
         body: JSON.stringify({
-          track_settings: [],
-          stop_lead_settings: "REPLY_TO_AN_EMAIL",
-          send_as_plain_text: false,
+          // SmartLead expresses tracking as opt-outs, so an unchecked
+          // box becomes a DONT_ entry rather than a missing one.
+          track_settings: [
+            ...(sendSettings.trackOpens ? [] : ["DONT_EMAIL_OPEN"]),
+            ...(sendSettings.trackClicks ? [] : ["DONT_LINK_CLICK"]),
+          ],
+          stop_lead_settings: sendSettings.stopOnReply ? "REPLY_TO_AN_EMAIL" : "NEVER",
+          send_as_plain_text: sendSettings.plainText,
           enable_ai_esp_matching: true,
         }),
       },
@@ -411,6 +454,11 @@ Deno.serve(async (req) => {
 
     // ── Step F: Schedule campaign ──
     const tz = campaign.timezone || "UTC";
+    console.log(
+      `Scheduling campaign ${campaign_id}: days=${sendSettings.days.join(",")} ` +
+        `${sendSettings.startHour}-${sendSettings.endHour} gap=${sendSettings.minGapMinutes}m ` +
+        `leads/day=${sendSettings.maxLeadsPerDay}`,
+    );
     const scheduleRes = await smartleadFetch(
       `/campaigns/${slCampaignId}/schedule`,
       smartleadKey,
@@ -418,11 +466,11 @@ Deno.serve(async (req) => {
         method: "POST",
         body: JSON.stringify({
           timezone: tz,
-          days_of_the_week: [1, 2, 3, 4, 5],
-          start_hour: "09:00",
-          end_hour: "17:00",
-          min_time_btw_emails: 10,
-          max_new_leads_per_day: 50,
+          days_of_the_week: sendSettings.days,
+          start_hour: sendSettings.startHour,
+          end_hour: sendSettings.endHour,
+          min_time_btw_emails: sendSettings.minGapMinutes,
+          max_new_leads_per_day: sendSettings.maxLeadsPerDay,
         }),
       },
     );

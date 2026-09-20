@@ -1,0 +1,26 @@
+-- Per-campaign sending schedule and safety settings.
+--
+-- Until now every campaign was pushed to SmartLead with the same
+-- hardcoded schedule: Mon–Fri, 09:00–17:00, 10 minutes between emails,
+-- 50 new leads a day. Those are the settings that decide whether a
+-- campaign reads as a person or as a blast, so they belong to the
+-- campaign and to the person launching it.
+--
+-- Stored as JSONB rather than a dozen columns: it's a single settings
+-- blob read once at launch and displayed on the campaign page, never
+-- filtered or joined on.
+--
+-- Shape (see src/lib/campaign-settings.ts, which owns the defaults):
+--   {
+--     days: [1,2,3,4,5],        -- 0=Sunday … 6=Saturday
+--     startHour: "09:00",
+--     endHour: "17:00",
+--     minGapMinutes: 15,
+--     maxLeadsPerDay: 25,
+--     trackOpens: true,
+--     trackClicks: true,
+--     stopOnReply: true,
+--     plainText: false
+--   }
+ALTER TABLE public.campaigns
+  ADD COLUMN IF NOT EXISTS send_settings JSONB NOT NULL DEFAULT '{}'::jsonb;
