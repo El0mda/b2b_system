@@ -1,6 +1,6 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { Link, NavLink, useLocation, useNavigate } from "react-router-dom";
-import { Search, Menu, X, LogOut, Settings, UsersRound } from "lucide-react";
+import { Search, Menu, X, LogOut, Settings, UsersRound, Mail } from "lucide-react";
 
 import { useAuth } from "@/hooks/use-auth";
 import { NAV } from "@/components/layout/nav-items";
@@ -135,6 +135,15 @@ export function AppShell({ children }: { children: ReactNode }) {
                       Settings
                     </DropdownItem>
                   )}
+                  <DropdownItem
+                    icon={<Mail className="h-4 w-4" />}
+                    onSelect={() => {
+                      close();
+                      navigate("/sender-accounts");
+                    }}
+                  >
+                    Sender Accounts
+                  </DropdownItem>
                   <DropdownItem
                     icon={<UsersRound className="h-4 w-4" />}
                     onSelect={() => {

@@ -15,6 +15,7 @@ import NewCampaignPage from "@/pages/campaigns-new";
 import CampaignDetailPage from "@/pages/campaign-detail";
 import LeadsPage from "@/pages/leads";
 import SequencesPage from "@/pages/sequences";
+import SenderAccountsPage from "@/pages/sender-accounts";
 import TasksPage from "@/pages/tasks";
 import CrmPage from "@/pages/crm";
 import AnalyticsPage from "@/pages/analytics";
@@ -124,6 +125,14 @@ export default function App() {
         element={
           <AuthGate>
             <TasksPage />
+          </AuthGate>
+        }
+      />
+      <Route
+        path="/sender-accounts"
+        element={
+          <AuthGate>
+            <SenderAccountsPage />
           </AuthGate>
         }
       />

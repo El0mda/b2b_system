@@ -543,6 +543,7 @@ export type Database = {
       }
       sender_accounts: {
         Row: {
+          user_id: string | null
           created_at: string | null
           domain: string | null
           domain_verified: boolean | null
@@ -555,6 +556,7 @@ export type Database = {
           sender_name: string
         }
         Insert: {
+          user_id?: string | null
           created_at?: string | null
           domain?: string | null
           domain_verified?: boolean | null
@@ -567,6 +569,7 @@ export type Database = {
           sender_name: string
         }
         Update: {
+          user_id?: string | null
           created_at?: string | null
           domain?: string | null
           domain_verified?: boolean | null

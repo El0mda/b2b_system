@@ -8,7 +8,7 @@ Open the Supabase dashboard → **SQL Editor** → New query → paste each file
 
 1. `migrations/0001_initial_schema.sql` — creates all tables and indexes
 2. `migrations/0002_rls_policies.sql` — enables RLS and adds org-scoped policies
-3. …through `migrations/0019_email_media.sql` (creates the public `email-media` storage bucket)
+3. …through `migrations/0020_sender_account_ownership.sql` (0019 creates the public `email-media` storage bucket; 0020 gives sender accounts an owner)
 
 The files are idempotent (`CREATE TABLE IF NOT EXISTS` / `DROP POLICY IF EXISTS`), so re-running them is safe.
 
@@ -23,6 +23,7 @@ supabase gen types typescript --project-id <ref> --schema public > src/types/db.
 ```
 supabase functions deploy odoo-push          # manual "Push to Odoo" button
 supabase functions deploy emailable-verify   # email verification (replaces neverbounce-proxy)
+supabase functions deploy smartlead-accounts # lists mailboxes connected in SmartLead
 #   needs: supabase secrets set EMAILABLE_API_KEY=...
 supabase functions deploy odoo-sync --no-verify-jwt
 supabase functions deploy campaign-action

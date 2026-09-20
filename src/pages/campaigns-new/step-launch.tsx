@@ -97,6 +97,12 @@ export function StepLaunch({
       toast.error("No sequence steps defined");
       return;
     }
+    // The sender is chosen in step 1; without it SmartLead has no
+    // mailbox to send from and the campaign would never go out.
+    if (!state.sender_email) {
+      toast.error("Pick the address to send from in the Configure step");
+      return;
+    }
     setLaunchError(null);
     setLaunchWarning(null);
 
@@ -149,9 +155,9 @@ export function StepLaunch({
           name: state.campaignName.trim(),
           status: "active",
           source: state.sourceTab === "lusha" ? "lusha" : "import",
-          sender_email: "mariam.nasser@etriplesoft.com",
-          sender_name: "Etriplesoft",
-          reply_to_email: state.reply_to_email || "mariam.nasser@etriplesoft.com",
+          sender_email: state.sender_email,
+          sender_name: state.sender_name ?? "",
+          reply_to_email: state.reply_to_email || state.sender_email,
           timezone: state.timezone,
           leads_added: newLeads.length,
           leads_searched: leadsSearched,
@@ -313,7 +319,11 @@ export function StepLaunch({
           <SummaryRow label="Campaign name" value={state.campaignName} />
           <SummaryRow
             label="Sender"
-            value="mariam.nasser@etriplesoft.com (SmartLead SMTP)"
+            value={
+              state.sender_email
+                ? `${state.sender_name ?? ""} <${state.sender_email}>`.trim()
+                : "Not selected"
+            }
           />
           <SummaryRow label="Timezone" value={state.timezone} />
           <SummaryRow label="Leads" value={String(selectedLeads.length)} />
@@ -431,8 +441,8 @@ export function StepLaunch({
           <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
           <div>
             This will send emails to <strong>{selectedLeads.length}</strong> contacts from{" "}
-            <strong>mariam.nasser@etriplesoft.com</strong>. Step 1 sends immediately;
-            steps 2+ are scheduled.
+            <strong>{state.sender_email ?? "your sender account"}</strong>. Step 1 sends
+            immediately; steps 2+ are scheduled.
           </div>
         </div>
       </div>
