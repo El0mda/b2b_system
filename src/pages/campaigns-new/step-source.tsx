@@ -359,14 +359,18 @@ function LushaTab({
       // down the ranking. Request full-size pages (independent of how many
       // *new* leads the user wants) and scan a much larger window before
       // giving up.
-      const PAGE_SIZE = 100;
-      const MAX_PAGES = 20;
-      let page = 1;
+      //
+      // 50 is Lusha's hard maximum per page — asking for more is rejected
+      // outright — so a bigger total means more pages, not bigger ones.
+      // Pages are 0-based: starting at 1 skipped the top 50 matches.
+      const PAGE_SIZE = 50;
+      const MAX_PAGES = 40; // scans up to 2,000 matches while skipping duplicates
+      let page = 0;
       let exhausted = false;
       let scannedCount = 0;
       let dedupedCount = 0;
 
-      while (collected.length < target && page <= MAX_PAGES && !exhausted) {
+      while (collected.length < target && page < MAX_PAGES && !exhausted) {
         const { data, error } = await supabase.functions.invoke("lusha-proxy", {
           body: { action: "search", ...filters, max_leads: PAGE_SIZE, page },
         });
@@ -1138,6 +1142,10 @@ function LushaTab({
             }
             className="max-w-[140px]"
           />
+          <p className="text-xs text-muted-foreground">
+            Up to 500. Lusha returns 50 per request, so larger numbers are fetched in several
+            pages automatically. Each lead you then enrich uses Lusha credits.
+          </p>
         </div>
       </FormSection>
 

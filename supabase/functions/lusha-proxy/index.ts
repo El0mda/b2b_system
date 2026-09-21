@@ -13,6 +13,11 @@ const LUSHA_API = "https://api.lusha.com";
 const LUSHA_V2 = "https://api.lusha.com";
 const CACHE_TTL_MS = 24 * 60 * 60 * 1000;
 
+// Lusha's prospecting search accepts 10–50 results per page. Verified
+// against the live API: size 100 returns 400.
+const LUSHA_MIN_PAGE_SIZE = 10;
+const LUSHA_MAX_PAGE_SIZE = 50;
+
 const FILTER_PATHS: Record<string, string> = {
   "filter-sizes": "/prospecting/filters/companies/sizes",
   "filter-industries": "/prospecting/filters/companies/industries_labels",
@@ -175,8 +180,17 @@ async function handleSearch(body: any, apiKey: string): Promise<Response> {
 
   const payload: Record<string, any> = {
     pages: {
-      page: Math.max(1, Number(body.page) || 1),
-      size: Math.max(10, Math.min(body.max_leads || 25, 100)),
+      // Lusha pages are 0-based. This used to force a minimum of 1,
+      // which silently skipped the first — best-matching — page of every
+      // search.
+      page: Math.max(0, Number(body.page) || 0),
+      // Lusha rejects anything over 50 ("pages.size must not be greater
+      // than 50") and anything under 10, so the size is clamped to what
+      // it accepts. Larger totals come from requesting more pages.
+      size: Math.max(
+        LUSHA_MIN_PAGE_SIZE,
+        Math.min(Number(body.max_leads) || 25, LUSHA_MAX_PAGE_SIZE),
+      ),
     },
     filters: {
       contacts: { include: contactFilters },
