@@ -19,9 +19,10 @@ const INITIAL_STATE: WizardState = {
   sourceTab: "import",
   leads: [],
   selectedLeadIds: new Set(),
-  sequenceSteps: [],
-  verticalKey: "builtin:manufacturing",
-  presetKey: "builtin:pain-point",
+  tracks: [],
+  activeTrackKey: null,
+  defaultTrackKey: null,
+  trackOverrides: {},
   campaignId: null,
   sendSettings: DEFAULT_SEND_SETTINGS,
   lushaFilters: {

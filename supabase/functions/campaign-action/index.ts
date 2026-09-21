@@ -70,43 +70,66 @@ Deno.serve(async (req) => {
       return json({ error: campaignError?.message ?? "Campaign not found" }, 404);
     }
 
-    const slId = (campaign as any).smartlead_campaign_id as string | null;
+    // A campaign with several sequences has one SmartLead campaign per
+    // sequence (campaign_tracks), and every one of them has to be paused,
+    // resumed or deleted — acting on only the first would leave the other
+    // audiences still being emailed.
+    const { data: trackRows } = await userClient
+      .from("campaign_tracks")
+      .select("smartlead_campaign_id")
+      .eq("campaign_id", campaign_id);
+    const slIds = [
+      ...new Set(
+        [
+          (campaign as any).smartlead_campaign_id as string | null,
+          ...((trackRows ?? []) as any[]).map((t) => t.smartlead_campaign_id as string | null),
+        ].filter((v): v is string => !!v),
+      ),
+    ];
     let smartleadWarning: string | null = null;
 
-    if (slId && smartleadKey) {
-      if (action === "delete") {
-        const res = await smartleadFetch(`/campaigns/${slId}`, smartleadKey, {
-          method: "DELETE",
-        });
-        // 404 means it's already gone on their side, which is the state
-        // we were trying to reach anyway.
-        if (!res.ok && res.status !== 404) {
-          const text = await res.text();
-          const detail = `SmartLead delete failed (${res.status}): ${text.slice(0, 300)}`;
+    if (slIds.length > 0 && smartleadKey) {
+      const failures: string[] = [];
+      for (const slId of slIds) {
+        if (action === "delete") {
+          const res = await smartleadFetch(`/campaigns/${slId}`, smartleadKey, { method: "DELETE" });
+          // 404 means it's already gone on their side, which is the state
+          // we were trying to reach anyway.
+          if (!res.ok && res.status !== 404) {
+            failures.push(`#${slId} (${res.status}): ${(await res.text()).slice(0, 200)}`);
+          }
+        } else {
+          const res = await smartleadFetch(`/campaigns/${slId}/status`, smartleadKey, {
+            method: "POST",
+            body: JSON.stringify({ status: action === "active" ? "START" : "PAUSED" }),
+          });
+          if (!res.ok) failures.push(`#${slId} (${res.status}): ${(await res.text()).slice(0, 200)}`);
+        }
+      }
+
+      if (failures.length > 0) {
+        const detail =
+          `SmartLead ${action === "delete" ? "delete" : "status update"} failed for ` +
+          `${failures.length} of ${slIds.length} campaign${slIds.length === 1 ? "" : "s"}: ` +
+          failures.join("; ");
+        if (action === "delete") {
           if (!force) {
-            return json(
-              {
-                error: detail,
-                // Tells the app it can offer a local-only delete rather
-                // than leaving the user with a row they can never remove.
-                smartlead_blocked: true,
-              },
-              502,
-            );
+            // Tells the app it can offer a local-only delete rather than
+            // leaving the user with a row they can never remove.
+            return json({ error: detail, smartlead_blocked: true }, 502);
           }
           console.error(`Forced delete of campaign ${campaign_id}: ${detail}`);
           smartleadWarning = detail;
-        }
-      } else {
-        const status = action === "active" ? "START" : "PAUSED";
-        const res = await smartleadFetch(`/campaigns/${slId}/status`, smartleadKey, {
-          method: "POST",
-          body: JSON.stringify({ status }),
-        });
-        if (!res.ok) {
-          const text = await res.text();
+        } else {
+          // Some sequences may already have switched — say so rather than
+          // implying nothing happened.
           return json(
-            { error: `SmartLead status update failed (${res.status}): ${text.slice(0, 300)}` },
+            {
+              error:
+                failures.length < slIds.length
+                  ? `${detail}. The other sequences were updated — try again to finish.`
+                  : detail,
+            },
             502,
           );
         }
@@ -160,7 +183,7 @@ Deno.serve(async (req) => {
 
     return json({
       ok: true,
-      synced_to_smartlead: !!slId,
+      synced_to_smartlead: slIds.length > 0,
       // Set only on a forced delete: the local row is gone but the
       // SmartLead campaign is still there and may still be sending.
       smartlead_warning: smartleadWarning,

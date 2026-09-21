@@ -66,13 +66,33 @@ Deno.serve(async (req) => {
     const slLeadId = body.lead_id != null ? String(body.lead_id) : null;
     const leadEmail: string | null = body.lead?.email ?? body.email?.to ?? null;
 
-    const { data: campaign } = slCampaignId
+    let { data: campaign } = slCampaignId
       ? await sb
           .from("campaigns")
           .select("id, org_id, name, created_by")
           .eq("smartlead_campaign_id", slCampaignId)
           .maybeSingle()
       : { data: null };
+
+    // A campaign with several sequences has one SmartLead campaign per
+    // sequence, and only the first is recorded on the campaign row. Events
+    // from the others are resolved through campaign_tracks — without this
+    // they'd be logged as unmatched and their opens and replies lost.
+    if (!campaign && slCampaignId) {
+      const { data: track } = await sb
+        .from("campaign_tracks")
+        .select("campaign_id")
+        .eq("smartlead_campaign_id", slCampaignId)
+        .maybeSingle();
+      if (track?.campaign_id) {
+        const { data } = await sb
+          .from("campaigns")
+          .select("id, org_id, name, created_by")
+          .eq("id", track.campaign_id)
+          .maybeSingle();
+        campaign = data;
+      }
+    }
 
     // Always log the raw event, matched or not — makes debugging delivery
     // issues possible without re-querying SmartLead.

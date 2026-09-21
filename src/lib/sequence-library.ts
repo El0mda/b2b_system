@@ -27,6 +27,8 @@ export interface OrgTemplate {
   name: string;
   description: string | null;
   steps: SequenceStep[];
+  // Who the sequence is for — used to route campaign leads to it.
+  job_positions: string[];
   created_by: string | null;
   created_at: string | null;
   updated_at: string | null;
@@ -63,6 +65,9 @@ export interface TemplateOption {
   name: string;
   description: string;
   steps: SequenceStep[];
+  jobPositions: string[];
+  /** Set for saved templates, so a campaign track can record its source. */
+  templateId: string | null;
   builtin: boolean;
 }
 
@@ -101,6 +106,9 @@ export function templateOptions(
     name: p.name,
     description: p.description,
     steps: p.steps,
+    // Built-ins are industry copy, not written for a particular role.
+    jobPositions: [] as string[],
+    templateId: null,
     builtin: true,
   }));
 
@@ -112,6 +120,8 @@ export function templateOptions(
       name: t.name,
       description: t.description ?? `${t.steps.length} steps`,
       steps: t.steps,
+      jobPositions: t.job_positions ?? [],
+      templateId: t.id,
       builtin: false,
     }));
 
@@ -163,11 +173,17 @@ export function useSequenceLibrary(orgId: string | undefined) {
     queryFn: async () => {
       const { data, error } = await supabase
         .from("sequence_templates")
-        .select("id, vertical_id, name, description, steps, created_by, created_at, updated_at")
+        .select(
+          "id, vertical_id, name, description, steps, job_positions, created_by, created_at, updated_at",
+        )
         .eq("org_id", orgId!)
         .order("name");
       if (error) throw error;
-      return (data ?? []).map((t) => ({ ...t, steps: parseSteps(t.steps) })) as OrgTemplate[];
+      return (data ?? []).map((t) => ({
+        ...t,
+        steps: parseSteps(t.steps),
+        job_positions: t.job_positions ?? [],
+      })) as OrgTemplate[];
     },
   });
 

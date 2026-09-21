@@ -17,6 +17,7 @@ import {
   Mail,
   PhoneCall,
   ArrowLeft,
+  Briefcase,
 } from "lucide-react";
 
 import { supabase } from "@/lib/supabase";
@@ -35,6 +36,7 @@ import {
 } from "@/components/ui/dialog";
 import { FullPageSpinner } from "@/components/ui/spinner";
 import { SequenceStepList } from "@/components/sequence/step-editor";
+import { JobPositionsInput } from "@/components/sequence/job-positions-input";
 import { isStepComplete, stepType, totalDays, type SequenceStep } from "@/lib/sequence-presets";
 import {
   templateOptions,
@@ -52,6 +54,7 @@ interface TemplateDraft {
   verticalId: string;
   name: string;
   description: string;
+  jobPositions: string[];
   steps: SequenceStep[];
 }
 
@@ -151,6 +154,7 @@ export default function SequencesPage() {
         // The step editor renumbers on add/remove, but a draft that came
         // from a built-in preset carries the preset's numbering.
         steps: d.steps.map((s, i) => ({ ...s, step: i + 1 })),
+        job_positions: d.jobPositions,
         updated_at: new Date().toISOString(),
       };
       if (d.id) {
@@ -314,6 +318,7 @@ export default function SequencesPage() {
                     verticalId: selectedVerticalId,
                     name: "",
                     description: "",
+                    jobPositions: [],
                     steps: [{ step: 1, delay_days: 0, subject: "", body: "" }],
                   })
                 }
@@ -350,6 +355,21 @@ export default function SequencesPage() {
                         </Badge>
                       )}
                     </div>
+                    {t.jobPositions.length > 0 && (
+                      <div className="flex flex-wrap items-center gap-1">
+                        <Briefcase className="h-3.5 w-3.5 text-muted-foreground" />
+                        {t.jobPositions.slice(0, 4).map((jp) => (
+                          <Badge key={jp} variant="default">
+                            {jp}
+                          </Badge>
+                        ))}
+                        {t.jobPositions.length > 4 && (
+                          <span className="text-xs text-muted-foreground">
+                            +{t.jobPositions.length - 4} more
+                          </span>
+                        )}
+                      </div>
+                    )}
                     <div className="flex items-center gap-3 text-xs text-muted-foreground">
                       <span className="flex items-center gap-1">
                         <Mail className="h-3.5 w-3.5" />
@@ -374,6 +394,7 @@ export default function SequencesPage() {
                               verticalId: saved.vertical_id ?? selectedVerticalId ?? "",
                               name: saved.name,
                               description: saved.description ?? "",
+                              jobPositions: saved.job_positions ?? [],
                               steps: saved.steps.length
                                 ? saved.steps
                                 : [{ step: 1, delay_days: 0, subject: "", body: "" }],
@@ -391,6 +412,7 @@ export default function SequencesPage() {
                             verticalId,
                             name: `${t.name} (copy)`,
                             description: t.description,
+                            jobPositions: t.jobPositions,
                             steps: t.steps.map((s, i) => ({ ...s, step: i + 1 })),
                           })
                         }
@@ -616,6 +638,18 @@ function TemplateEditor({
               onChange={(e) => onChange({ ...draft, description: e.target.value })}
               placeholder="4 steps, 10 days — leads with peak-season capacity."
             />
+          </div>
+          <div className="space-y-1.5 sm:col-span-2">
+            <Label htmlFor="template-positions">Job positions this sequence is for</Label>
+            <JobPositionsInput
+              id="template-positions"
+              value={draft.jobPositions}
+              onChange={(jobPositions) => onChange({ ...draft, jobPositions })}
+            />
+            <p className="text-xs text-muted-foreground">
+              When a campaign uses several sequences, each lead gets the one whose job positions
+              match its title — "HR Manager" also matches "Senior HR Manager".
+            </p>
           </div>
         </CardContent>
       </Card>

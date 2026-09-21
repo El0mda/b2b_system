@@ -172,6 +172,69 @@ export type Database = {
           },
         ]
       }
+      campaign_tracks: {
+        Row: {
+          campaign_id: string
+          created_at: string | null
+          error: string | null
+          id: string
+          is_default: boolean
+          job_positions: string[]
+          lead_count: number
+          name: string
+          org_id: string
+          position: number
+          smartlead_campaign_id: string | null
+          status: string
+          template_id: string | null
+        }
+        Insert: {
+          campaign_id: string
+          created_at?: string | null
+          error?: string | null
+          id?: string
+          is_default?: boolean
+          job_positions?: string[]
+          lead_count?: number
+          name: string
+          org_id: string
+          position?: number
+          smartlead_campaign_id?: string | null
+          status?: string
+          template_id?: string | null
+        }
+        Update: {
+          campaign_id?: string
+          created_at?: string | null
+          error?: string | null
+          id?: string
+          is_default?: boolean
+          job_positions?: string[]
+          lead_count?: number
+          name?: string
+          org_id?: string
+          position?: number
+          smartlead_campaign_id?: string | null
+          status?: string
+          template_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "campaign_tracks_campaign_id_fkey"
+            columns: ["campaign_id"]
+            isOneToOne: false
+            referencedRelation: "campaigns"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "campaign_tracks_template_id_fkey"
+            columns: ["template_id"]
+            isOneToOne: false
+            referencedRelation: "sequence_templates"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       campaigns: {
         Row: {
           send_settings: Json
@@ -375,6 +438,7 @@ export type Database = {
       }
       leads: {
         Row: {
+          track_id: string | null
           added_to_campaign: boolean | null
           campaign_id: string | null
           company: string | null
@@ -418,6 +482,7 @@ export type Database = {
           website: string | null
         }
         Insert: {
+          track_id?: string | null
           added_to_campaign?: boolean | null
           campaign_id?: string | null
           company?: string | null
@@ -461,6 +526,7 @@ export type Database = {
           website?: string | null
         }
         Update: {
+          track_id?: string | null
           added_to_campaign?: boolean | null
           campaign_id?: string | null
           company?: string | null
@@ -596,6 +662,7 @@ export type Database = {
       }
       sequence_templates: {
         Row: {
+          job_positions: string[]
           created_at: string | null
           created_by: string | null
           description: string | null
@@ -607,6 +674,7 @@ export type Database = {
           vertical_id: string | null
         }
         Insert: {
+          job_positions?: string[]
           created_at?: string | null
           created_by?: string | null
           description?: string | null
@@ -618,6 +686,7 @@ export type Database = {
           vertical_id?: string | null
         }
         Update: {
+          job_positions?: string[]
           created_at?: string | null
           created_by?: string | null
           description?: string | null
@@ -685,6 +754,7 @@ export type Database = {
       }
       sequences: {
         Row: {
+          track_id: string | null
           attachments: Json
           body: string | null
           campaign_id: string | null
@@ -699,6 +769,7 @@ export type Database = {
           title: string | null
         }
         Insert: {
+          track_id?: string | null
           attachments?: Json
           body?: string | null
           campaign_id?: string | null
@@ -713,6 +784,7 @@ export type Database = {
           title?: string | null
         }
         Update: {
+          track_id?: string | null
           attachments?: Json
           body?: string | null
           campaign_id?: string | null

@@ -113,6 +113,7 @@ interface Lead {
   odoo_lead_id: string | null;
   odoo_stage: string | null;
   odoo_stage_synced_at: string | null;
+  track_id: string | null;
   created_at: string | null;
 }
 
@@ -127,7 +128,22 @@ interface SequenceStep {
   title: string | null;
   notes: string | null;
   attachments: unknown;
+  track_id: string | null;
   created_at: string | null;
+}
+
+// One sequence within the campaign (migration 0022). Campaigns created
+// before multi-sequence support have none.
+interface CampaignTrack {
+  id: string;
+  name: string;
+  position: number;
+  job_positions: string[];
+  status: string;
+  error: string | null;
+  lead_count: number;
+  is_default: boolean;
+  smartlead_campaign_id: string | null;
 }
 
 interface WebhookLog {
@@ -198,6 +214,21 @@ export default function CampaignDetailPage() {
         .eq("campaign_id", id!)
         .order("created_at", { ascending: true });
       return (data ?? []) as Lead[];
+    },
+  });
+
+  const { data: tracks = [] } = useQuery<CampaignTrack[]>({
+    queryKey: ["campaign-tracks", id],
+    enabled: !!id,
+    queryFn: async () => {
+      const { data } = await supabase
+        .from("campaign_tracks")
+        .select(
+          "id, name, position, job_positions, status, error, lead_count, is_default, smartlead_campaign_id",
+        )
+        .eq("campaign_id", id!)
+        .order("position", { ascending: true });
+      return (data ?? []) as CampaignTrack[];
     },
   });
 
@@ -455,7 +486,10 @@ export default function CampaignDetailPage() {
 
       {/* Tab Content */}
       {tab === "overview" && (
-        <TabOverview campaign={campaign} leadStats={leadStats} sourceLabel={sourceLabel} createdDate={createdDate} />
+        <>
+          <TabOverview campaign={campaign} leadStats={leadStats} sourceLabel={sourceLabel} createdDate={createdDate} />
+          <TrackBreakdown campaignId={campaign.id} tracks={tracks} leads={leads} />
+        </>
       )}
       {tab === "leads" && (
         <TabLeads
@@ -470,7 +504,7 @@ export default function CampaignDetailPage() {
           onCloseLead={() => setSelectedLead(null)}
         />
       )}
-      {tab === "sequences" && <TabSequences sequences={sequences} />}
+      {tab === "sequences" && <TabSequences sequences={sequences} tracks={tracks} />}
       {tab === "performance" && (
         <TabPerformance leads={leads} campaign={campaign} />
       )}
@@ -830,7 +864,145 @@ function describeStepDelay(s: SequenceStep): string {
   return `Delayed ${parts.join(" ")} after previous step`;
 }
 
-function TabSequences({ sequences }: { sequences: SequenceStep[] }) {
+// Steps grouped under the sequence they belong to. A campaign with a
+// single sequence (or none recorded — pre-multi-sequence) renders exactly
+// as it always did.
+function TabSequences({
+  sequences,
+  tracks,
+}: {
+  sequences: SequenceStep[];
+  tracks: CampaignTrack[];
+}) {
+  if (tracks.length <= 1) return <StepCards sequences={sequences} />;
+  return (
+    <div className="space-y-8">
+      {tracks.map((t) => (
+        <div key={t.id} className="space-y-3">
+          <div className="flex flex-wrap items-center gap-2">
+            <h3 className="text-base font-semibold">{t.name}</h3>
+            <TrackStatusBadge status={t.status} />
+            <Badge variant="secondary">{t.lead_count} leads</Badge>
+            {t.is_default && <Badge variant="outline">Default</Badge>}
+          </div>
+          {t.job_positions.length > 0 && (
+            <p className="text-xs text-muted-foreground">For: {t.job_positions.join(", ")}</p>
+          )}
+          <StepCards sequences={sequences.filter((s) => s.track_id === t.id)} />
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function TrackStatusBadge({ status }: { status: string }) {
+  if (status === "active") return <Badge variant="success">Live</Badge>;
+  if (status === "failed") return <Badge className="bg-destructive/10 text-destructive">Failed</Badge>;
+  if (status === "skipped") return <Badge variant="secondary">No leads — skipped</Badge>;
+  return <Badge variant="secondary">Not sent yet</Badge>;
+}
+
+// Per-sequence results, so it's clear which message works for which
+// audience — plus a way to re-send any sequence SmartLead rejected.
+function TrackBreakdown({
+  campaignId,
+  tracks,
+  leads,
+}: {
+  campaignId: string;
+  tracks: CampaignTrack[];
+  leads: Lead[];
+}) {
+  const qc = useQueryClient();
+  const retry = useMutation({
+    mutationFn: async () => {
+      const { data, error } = await supabase.functions.invoke("send-campaign", {
+        body: { campaign_id: campaignId },
+      });
+      if (error) throw new Error(await getFunctionErrorMessage(error));
+      if ((data as any)?.error) throw new Error((data as any).error);
+      return data as { tracks?: Array<{ status: string }> };
+    },
+    onSuccess: (data) => {
+      qc.invalidateQueries({ queryKey: ["campaign-tracks", campaignId] });
+      qc.invalidateQueries({ queryKey: ["campaign", campaignId] });
+      const failed = (data?.tracks ?? []).filter((t) => t.status === "failed").length;
+      if (failed > 0) toast.error(`${failed} sequence${failed === 1 ? "" : "s"} still failing`);
+      else toast.success("All sequences are live");
+    },
+    onError: (e: any) => toast.error(e?.message || "Retry failed"),
+  });
+
+  // A single healthy sequence needs no breakdown — the page above already
+  // is its breakdown.
+  const needsAttention = tracks.some((t) => t.status === "failed" || t.status === "pending");
+  if (tracks.length <= 1 && !needsAttention) return null;
+
+  return (
+    <Card className="mt-6">
+      <CardContent className="space-y-3 p-5">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <p className="text-sm font-semibold">
+            {tracks.length > 1 ? "Results by sequence" : "Sequence status"}
+          </p>
+          {needsAttention && (
+            <Button size="sm" variant="outline" onClick={() => retry.mutate()} disabled={retry.isPending}>
+              {retry.isPending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
+              Retry sending
+            </Button>
+          )}
+        </div>
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="border-b border-border text-left text-xs text-muted-foreground">
+                <th className="py-2 pr-3 font-medium">Sequence</th>
+                <th className="py-2 pr-3 font-medium">Status</th>
+                <th className="py-2 pr-3 text-right font-medium">Leads</th>
+                <th className="py-2 pr-3 text-right font-medium">Delivered</th>
+                <th className="py-2 pr-3 text-right font-medium">Opened</th>
+                <th className="py-2 pr-3 text-right font-medium">Clicked</th>
+                <th className="py-2 text-right font-medium">Replied</th>
+              </tr>
+            </thead>
+            <tbody>
+              {tracks.map((t) => {
+                const mine = leads.filter((l) => l.track_id === t.id);
+                const n = (pred: (l: Lead) => boolean) => mine.filter(pred).length;
+                const pct = (x: number) => (mine.length ? ` (${Math.round((x / mine.length) * 100)}%)` : "");
+                const replied = n((l) => !!l.replied_at);
+                const opened = n((l) => !!l.email_opened);
+                return (
+                  <tr key={t.id} className="border-b border-border last:border-b-0 align-top">
+                    <td className="py-2 pr-3">
+                      <p className="font-medium">{t.name}</p>
+                      {t.job_positions.length > 0 && (
+                        <p className="max-w-xs truncate text-xs text-muted-foreground">
+                          {t.job_positions.join(", ")}
+                        </p>
+                      )}
+                      {t.status === "failed" && t.error && (
+                        <p className="mt-1 max-w-md text-xs text-destructive">{t.error}</p>
+                      )}
+                    </td>
+                    <td className="py-2 pr-3"><TrackStatusBadge status={t.status} /></td>
+                    <td className="py-2 pr-3 text-right">{mine.length}</td>
+                    <td className="py-2 pr-3 text-right">{n((l) => !!l.email_delivered)}</td>
+                    <td className="py-2 pr-3 text-right">{opened}{pct(opened)}</td>
+                    <td className="py-2 pr-3 text-right">{n((l) => !!l.email_clicked)}</td>
+                    <td className="py-2 text-right font-medium">{replied}{pct(replied)}</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
+function StepCards({ sequences }: { sequences: SequenceStep[] }) {
   if (sequences.length === 0) {
     return (
       <div className="py-12 text-center text-sm text-muted-foreground">

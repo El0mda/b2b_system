@@ -37,6 +37,7 @@ import {
   type SequenceStep,
 } from "@/lib/sequence-presets";
 import { describeDays } from "@/lib/campaign-settings";
+import { assignLeads, leadKey } from "@/lib/tracks";
 import { cn, getFunctionErrorMessage } from "@/lib/utils";
 import type { Database } from "@/types/db";
 import type { WizardState } from "./types";
@@ -50,6 +51,16 @@ type LaunchPhase =
   | "set-sender"
   | "schedule"
   | "complete";
+
+// What send-campaign reports for each sequence.
+interface TrackResult {
+  id: string;
+  name: string;
+  status: "pending" | "active" | "failed" | "skipped";
+  error?: string | null;
+  leads?: number;
+  smartlead_campaign_id?: string | null;
+}
 
 interface PhaseResult {
   smartleadCampaignId?: string;
@@ -82,8 +93,28 @@ export function StepLaunch({
   const selectedLeads = state.leads.filter((_, i) =>
     state.selectedLeadIds.has(String(i)),
   );
-  const totalDays = state.sequenceSteps.reduce((sum, s) => sum + (s.delay_days || 0), 0);
+  // Same routing the Sequences step showed, recomputed here so the
+  // summary and the launch agree on exactly who gets what.
+  const routing = assignLeads(
+    selectedLeads,
+    state.tracks,
+    state.defaultTrackKey,
+    state.trackOverrides,
+  );
+  const routedCount = selectedLeads.length - routing.excluded;
+  const longestDays = Math.max(
+    0,
+    ...state.tracks.map((t) =>
+      t.steps.length ? Math.round(offsetHoursThrough(t.steps, t.steps.length - 1) / 24) : 0,
+    ),
+  );
   const launched = phase === "complete";
+
+  // Once the campaign row exists, launching again would create a second
+  // copy. A failed send is retried against the same campaign instead.
+  const [savedCampaignId, setSavedCampaignId] = useState<string | null>(null);
+  const [trackResults, setTrackResults] = useState<TrackResult[]>([]);
+  const [retrying, setRetrying] = useState(false);
 
   const handleLaunch = async () => {
     if (!orgId) {
@@ -94,8 +125,8 @@ export function StepLaunch({
       toast.error("No leads selected");
       return;
     }
-    if (state.sequenceSteps.length === 0) {
-      toast.error("No sequence steps defined");
+    if (state.tracks.length === 0 || state.tracks.some((t) => t.steps.length === 0)) {
+      toast.error("Every sequence needs at least one step");
       return;
     }
     // The sender is chosen in step 1; without it SmartLead has no
@@ -144,6 +175,22 @@ export function StepLaunch({
         return;
       }
 
+      // Route leads to sequences. Anyone matching none, with the default
+      // set to "leave them out", is dropped here rather than launched
+      // with no sequence.
+      const routed = assignLeads(
+        newLeads,
+        state.tracks,
+        state.defaultTrackKey,
+        state.trackOverrides,
+      );
+      newLeads = newLeads.filter((l) => routed.byLead.get(leadKey(l)));
+      if (newLeads.length === 0) {
+        toast.error("None of these leads are assigned to a sequence");
+        setPhase("idle");
+        return;
+      }
+
       const leadsSearched = newLeads.length;
       const leadsEnriched = newLeads.filter((l) => l.has_work_email || !!l.email).length;
       const leadsVerified = newLeads.filter((l) => l.nb_result).length;
@@ -170,6 +217,37 @@ export function StepLaunch({
         .select()
         .single();
       if (campaignError) throw campaignError;
+      setSavedCampaignId(campaign.id);
+
+      // One row per sequence. send-campaign turns each into its own
+      // SmartLead campaign — SmartLead allows only one sequence apiece.
+      const trackRows = state.tracks.map((t, i) => {
+        const count = routed.counts.get(t.key) ?? 0;
+        return {
+          campaign_id: campaign.id,
+          org_id: orgId,
+          name: t.name.trim() || `Sequence ${i + 1}`,
+          position: i,
+          job_positions: t.jobPositions,
+          is_default: t.key === state.defaultTrackKey,
+          template_id: t.templateId,
+          lead_count: count,
+          status: count > 0 ? "pending" : "skipped",
+        };
+      });
+      const { data: insertedTracks, error: tracksError } = await supabase
+        .from("campaign_tracks")
+        .insert(trackRows)
+        .select("id, position");
+      if (tracksError) throw tracksError;
+      // Keyed by position, not insert order: the returned rows aren't
+      // guaranteed to come back in the order they were sent.
+      const trackIdByKey = new Map(
+        state.tracks.map((t, i) => [
+          t.key,
+          (insertedTracks ?? []).find((r) => r.position === i)?.id as string,
+        ]),
+      );
 
       const leadRows = newLeads.map((l) => ({
         org_id: orgId,
@@ -190,11 +268,12 @@ export function StepLaunch({
         nb_result: l.nb_result ?? null,
         added_to_campaign: true,
         current_step: 1,
+        track_id: trackIdByKey.get(routed.byLead.get(leadKey(l)) ?? "") ?? null,
       }));
       const { data: insertedLeads, error: leadsError } = await supabase
         .from("leads")
         .insert(leadRows)
-        .select("id, email, first_name, last_name, full_name, company, job_title, location");
+        .select("id, email, first_name, last_name, full_name, company, job_title, location, track_id");
       if (leadsError) throw leadsError;
 
       if (orgId && profile) {
@@ -208,40 +287,46 @@ export function StepLaunch({
         });
       }
 
-      const sequenceRows = state.sequenceSteps.map((s, i) => ({
-        campaign_id: campaign.id,
-        step: i + 1,
-        step_type: stepType(s),
-        delay_days: s.delay_days ?? 0,
-        delay_hours: s.delay_hours ?? 0,
-        subject: stepType(s) === "call" ? null : s.subject,
-        body: stepType(s) === "call" ? null : s.body,
-        title: stepType(s) === "call" ? (s.title ?? "Call the lead") : null,
-        notes: stepType(s) === "call" ? (s.notes ?? null) : null,
-        attachments: stepType(s) === "call" ? [] : (s.attachments ?? []),
-      }));
-      const { data: insertedSequences, error: seqError } = await supabase
-        .from("sequences")
-        .insert(sequenceRows)
-        .select("id, step, step_type, title, notes");
-      if (seqError) throw seqError;
+      // Each sequence's steps are numbered from 1 within that sequence,
+      // and its call reminders go only to the leads routed to it.
+      for (const track of state.tracks) {
+        const trackId = trackIdByKey.get(track.key);
+        if (!trackId) continue;
+        const sequenceRows = track.steps.map((s, i) => ({
+          campaign_id: campaign.id,
+          track_id: trackId,
+          step: i + 1,
+          step_type: stepType(s),
+          delay_days: s.delay_days ?? 0,
+          delay_hours: s.delay_hours ?? 0,
+          subject: stepType(s) === "call" ? null : s.subject,
+          body: stepType(s) === "call" ? null : s.body,
+          title: stepType(s) === "call" ? (s.title ?? "Call the lead") : null,
+          notes: stepType(s) === "call" ? (s.notes ?? null) : null,
+          attachments: stepType(s) === "call" ? [] : (s.attachments ?? []),
+        }));
+        const { data: insertedSequences, error: seqError } = await supabase
+          .from("sequences")
+          .insert(sequenceRows)
+          .select("id, step, step_type, title, notes");
+        if (seqError) throw seqError;
 
-      // A call step is work for a person, not something SmartLead can
-      // run — so it becomes one reminder per lead, due at the same point
-      // in the cadence the step sits at. Non-fatal: the campaign is
-      // already saved, and a missing reminder shouldn't fail a launch.
-      try {
-        await createCallTasks({
-          steps: state.sequenceSteps,
-          sequences: insertedSequences ?? [],
-          leads: insertedLeads ?? [],
-          orgId: orgId!,
-          campaignId: campaign.id,
-          userId: profile?.id ?? null,
-        });
-      } catch (taskError) {
-        console.error("Failed to create call reminders:", taskError);
-        toast.error("Campaign launched, but the call reminders couldn't be created.");
+        // A call step is work for a person, not something SmartLead can
+        // run — so it becomes one reminder per lead. Non-fatal: a missing
+        // reminder shouldn't fail a launch.
+        try {
+          await createCallTasks({
+            steps: track.steps,
+            sequences: insertedSequences ?? [],
+            leads: (insertedLeads ?? []).filter((l) => l.track_id === trackId),
+            orgId: orgId!,
+            campaignId: campaign.id,
+            userId: profile?.id ?? null,
+          });
+        } catch (taskError) {
+          console.error("Failed to create call reminders:", taskError);
+          toast.error(`"${track.name}" launched, but its call reminders couldn't be created.`);
+        }
       }
 
       // Call send-campaign edge function (SmartLead)
@@ -257,13 +342,27 @@ export function StepLaunch({
           throw new Error(data.error);
         }
         fnData = data;
+        setTrackResults(((data as any)?.tracks ?? []) as TrackResult[]);
       } catch (fnError: any) {
         const msg = await getFunctionErrorMessage(fnError);
         console.error("send-campaign function failed:", fnError);
-        setLaunchError(`SmartLead error: ${msg}`);
+        setLaunchError(
+          `Campaign saved, but SmartLead didn't accept it: ${msg}. Use "Retry sending" below — pressing Launch again would create a duplicate.`,
+        );
         toast.error(`Campaign saved but sending failed: ${msg}`);
         setPhase("idle");
         return;
+      }
+
+      // Some sequences may have gone live and others not. Report it
+      // honestly and offer a retry, rather than calling it launched.
+      const failedTracks = ((fnData as any)?.tracks ?? []).filter(
+        (t: TrackResult) => t.status === "failed",
+      );
+      if (failedTracks.length > 0) {
+        setLaunchError(
+          `${failedTracks.length} sequence${failedTracks.length === 1 ? "" : "s"} couldn't be sent to SmartLead — see below and use "Retry sending".`,
+        );
       }
 
       setPhaseResult({
@@ -296,8 +395,13 @@ export function StepLaunch({
         console.error("Failed to record lead usage:", usageError.message);
       }
 
-      setPhase("complete");
       setLaunchedCampaignId(campaign.id);
+      if (failedTracks.length > 0) {
+        // Leave the retry path open; don't claim success.
+        setPhase("idle");
+        return;
+      }
+      setPhase("complete");
       setState((p) => ({ ...p, campaignId: campaign.id }));
       if (fnData?.warning) {
         setLaunchWarning(fnData.warning);
@@ -309,6 +413,39 @@ export function StepLaunch({
       setLaunchError(e?.message || "Failed to launch campaign");
       toast.error(e?.message || "Failed to launch campaign");
       setPhase("idle");
+    }
+  };
+
+  // Re-sends only the sequences that aren't live yet — send-campaign
+  // skips any that already have a SmartLead campaign, so this never
+  // duplicates what went out the first time.
+  const retrySend = async () => {
+    if (!savedCampaignId) return;
+    setRetrying(true);
+    try {
+      const { data, error } = await supabase.functions.invoke("send-campaign", {
+        body: { campaign_id: savedCampaignId },
+      });
+      if (error) throw new Error(await getFunctionErrorMessage(error));
+      if ((data as any)?.error) throw new Error((data as any).error);
+      const results = ((data as any)?.tracks ?? []) as TrackResult[];
+      setTrackResults(results);
+      const stillFailed = results.filter((t) => t.status === "failed");
+      if (stillFailed.length === 0) {
+        setLaunchError(null);
+        setLaunchedCampaignId(savedCampaignId);
+        setPhase("complete");
+        toast.success("All sequences are live");
+      } else {
+        setLaunchError(
+          `${stillFailed.length} sequence${stillFailed.length === 1 ? "" : "s"} still failing — see the reason below.`,
+        );
+      }
+    } catch (e: any) {
+      setLaunchError(e?.message || "Retry failed");
+      toast.error(e?.message || "Retry failed");
+    } finally {
+      setRetrying(false);
     }
   };
 
@@ -333,9 +470,24 @@ export function StepLaunch({
             label="Schedule"
             value={`${describeDays(state.sendSettings.days)} ${state.sendSettings.startHour}–${state.sendSettings.endHour} · ${state.sendSettings.minGapMinutes} min apart · ${state.sendSettings.maxLeadsPerDay}/day`}
           />
-          <SummaryRow label="Leads" value={String(selectedLeads.length)} />
-          <SummaryRow label="Sequence steps" value={String(state.sequenceSteps.length)} />
-          <SummaryRow label="Total duration" value={`${totalDays} days`} />
+          <SummaryRow label="Leads" value={String(routedCount)} />
+          <SummaryRow
+            label={state.tracks.length === 1 ? "Sequence" : "Sequences"}
+            value={
+              state.tracks.length === 1
+                ? `${state.tracks[0].name} · ${state.tracks[0].steps.length} steps`
+                : state.tracks
+                    .map((t) => `${t.name} (${routing.counts.get(t.key) ?? 0})`)
+                    .join(" · ")
+            }
+          />
+          {routing.excluded > 0 && (
+            <SummaryRow
+              label="Left out"
+              value={`${routing.excluded} lead${routing.excluded === 1 ? "" : "s"} matching no sequence`}
+            />
+          )}
+          <SummaryRow label="Longest sequence" value={`${longestDays} days`} />
         </CardContent>
       </Card>
 
@@ -372,71 +524,94 @@ export function StepLaunch({
       </Collapsible>
 
       <Collapsible
-        title={`Sequence (${state.sequenceSteps.length} steps)`}
+        title={
+          state.tracks.length === 1
+            ? `Sequence (${state.tracks[0]?.steps.length ?? 0} steps)`
+            : `Sequences (${state.tracks.length})`
+        }
         open={showSequences}
         onToggle={() => setShowSequences((s) => !s)}
       >
-        <div className="space-y-3 p-4">
-          {state.sequenceSteps.map((s, i) => {
-            const previewLead = selectedLeads[0] ?? {
-              first_name: "Sample",
-              company: "Example Inc",
-            };
-            const isCall = stepType(s) === "call";
-            const offsetHours = offsetHoursThrough(state.sequenceSteps, i);
-            const when = new Date(Date.now() + offsetHours * 60 * 60 * 1000);
-            const scheduled =
-              offsetHours === 0
-                ? isCall
-                  ? "Due at launch"
-                  : "Sent immediately"
-                : `${isCall ? "Due" : "Sends"} ${when.toLocaleString([], {
-                    dateStyle: "medium",
-                    timeStyle: "short",
-                  })}`;
+        <div className="space-y-5 p-4">
+          {state.tracks.map((track) => {
+            // Preview each sequence with one of its own leads.
+            const sample =
+              selectedLeads.find((l) => routing.byLead.get(leadKey(l)) === track.key) ??
+              selectedLeads[0] ?? { first_name: "Sample", company: "Example Inc" };
             return (
-              <div key={i} className="rounded-md border border-border p-3">
-                <div className="mb-2 flex items-center gap-2">
-                  <Badge variant="info">Step {i + 1}</Badge>
-                  {isCall ? (
-                    <Badge variant="warning">
-                      <PhoneCall className="h-3 w-3" /> Call
-                    </Badge>
-                  ) : (
+              <div key={track.key} className="space-y-3">
+                {state.tracks.length > 1 && (
+                  <div className="flex flex-wrap items-center gap-2">
+                    <p className="text-sm font-semibold">{track.name}</p>
                     <Badge variant="secondary">
-                      <Mail className="h-3 w-3" /> Email
+                      {routing.counts.get(track.key) ?? 0} leads
                     </Badge>
-                  )}
-                  <span className="text-xs text-muted-foreground">{scheduled}</span>
-                </div>
-                <div className="text-sm font-semibold">
-                  {isCall
-                    ? processTemplate(s.title ?? "", previewLead) || "Call the lead"
-                    : processTemplate(s.subject, previewLead) || "(no subject)"}
-                </div>
-                <p className="mt-1 line-clamp-3 whitespace-pre-wrap text-xs text-muted-foreground">
-                  {isCall
-                    ? processTemplate(s.notes ?? "", previewLead) || "No call script"
-                    : processTemplate(s.body, previewLead) || "(no body)"}
-                </p>
-                {!isCall && (s.attachments?.length ?? 0) > 0 && (
-                  <div className="mt-2 flex flex-wrap gap-2">
-                    {s.attachments!.map((m, j) => (
-                      <div key={j} className="relative">
-                        <img
-                          src={m.kind === "video" ? (m.poster_url ?? "") : m.url}
-                          alt={m.name}
-                          className="h-14 w-24 rounded border border-border object-cover"
-                        />
-                        {m.kind === "video" && (
-                          <span className="absolute bottom-0.5 left-0.5 rounded bg-black/60 px-1 text-[10px] text-white">
-                            Video
-                          </span>
-                        )}
-                      </div>
-                    ))}
+                    {track.jobPositions.length > 0 && (
+                      <span className="text-xs text-muted-foreground">
+                        for {track.jobPositions.join(", ")}
+                      </span>
+                    )}
                   </div>
                 )}
+                {track.steps.map((s, i) => {
+                  const isCall = stepType(s) === "call";
+                  const offsetHours = offsetHoursThrough(track.steps, i);
+                  const when = new Date(Date.now() + offsetHours * 60 * 60 * 1000);
+                  const scheduled =
+                    offsetHours === 0
+                      ? isCall
+                        ? "Due at launch"
+                        : "Sent immediately"
+                      : `${isCall ? "Due" : "Sends"} ${when.toLocaleString([], {
+                          dateStyle: "medium",
+                          timeStyle: "short",
+                        })}`;
+                  return (
+                    <div key={i} className="rounded-md border border-border p-3">
+                      <div className="mb-2 flex items-center gap-2">
+                        <Badge variant="info">Step {i + 1}</Badge>
+                        {isCall ? (
+                          <Badge variant="warning">
+                            <PhoneCall className="h-3 w-3" /> Call
+                          </Badge>
+                        ) : (
+                          <Badge variant="secondary">
+                            <Mail className="h-3 w-3" /> Email
+                          </Badge>
+                        )}
+                        <span className="text-xs text-muted-foreground">{scheduled}</span>
+                      </div>
+                      <div className="text-sm font-semibold">
+                        {isCall
+                          ? processTemplate(s.title ?? "", sample) || "Call the lead"
+                          : processTemplate(s.subject, sample) || "(no subject)"}
+                      </div>
+                      <p className="mt-1 line-clamp-3 whitespace-pre-wrap text-xs text-muted-foreground">
+                        {isCall
+                          ? processTemplate(s.notes ?? "", sample) || "No call script"
+                          : processTemplate(s.body, sample) || "(no body)"}
+                      </p>
+                      {!isCall && (s.attachments?.length ?? 0) > 0 && (
+                        <div className="mt-2 flex flex-wrap gap-2">
+                          {s.attachments!.map((m, j) => (
+                            <div key={j} className="relative">
+                              <img
+                                src={m.kind === "video" ? (m.poster_url ?? "") : m.url}
+                                alt={m.name}
+                                className="h-14 w-24 rounded border border-border object-cover"
+                              />
+                              {m.kind === "video" && (
+                                <span className="absolute bottom-0.5 left-0.5 rounded bg-black/60 px-1 text-[10px] text-white">
+                                  Video
+                                </span>
+                              )}
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
               </div>
             );
           })}
@@ -447,7 +622,7 @@ export function StepLaunch({
         <div className="flex items-start gap-2">
           <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
           <div>
-            This will send emails to <strong>{selectedLeads.length}</strong> contacts from{" "}
+            This will send emails to <strong>{routedCount}</strong> contacts from{" "}
             <strong>{state.sender_email ?? "your sender account"}</strong>. Step 1 sends
             immediately; steps 2+ are scheduled.
           </div>
@@ -522,6 +697,43 @@ export function StepLaunch({
         </div>
       )}
 
+      {trackResults.length > 1 && (
+        <Card>
+          <CardContent className="space-y-2 p-5">
+            <p className="text-sm font-semibold">Sequences in SmartLead</p>
+            {trackResults.map((t) => (
+              <div
+                key={t.id}
+                className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-border p-2.5 text-sm"
+              >
+                <span className="font-medium">
+                  {t.name}
+                  {typeof t.leads === "number" && (
+                    <span className="ml-1.5 text-xs text-muted-foreground">{t.leads} leads</span>
+                  )}
+                </span>
+                {t.status === "active" && <Badge variant="success">Live</Badge>}
+                {t.status === "skipped" && <Badge variant="secondary">No leads — skipped</Badge>}
+                {t.status === "pending" && <Badge variant="secondary">Not sent yet</Badge>}
+                {t.status === "failed" && <Badge className="bg-destructive/10 text-destructive">Failed</Badge>}
+                {t.status === "failed" && t.error && (
+                  <p className="w-full text-xs text-destructive">{t.error}</p>
+                )}
+              </div>
+            ))}
+          </CardContent>
+        </Card>
+      )}
+
+      {savedCampaignId && !launched && (
+        <div className="flex justify-end">
+          <Button variant="outline" onClick={retrySend} disabled={retrying}>
+            {retrying ? <Spinner /> : <Rocket className="h-4 w-4" />}
+            Retry sending
+          </Button>
+        </div>
+      )}
+
       {launchWarning && (
         <div className="rounded-md border border-amber-500/20 bg-amber-500/10 p-3 text-sm text-amber-800 dark:text-amber-400">
           {launchWarning}
@@ -548,7 +760,7 @@ export function StepLaunch({
         ) : (
           <Button
             onClick={handleLaunch}
-            disabled={phase !== "idle" || selectedLeads.length === 0}
+            disabled={phase !== "idle" || routedCount === 0 || !!savedCampaignId}
             className={cn(phase !== "idle" && "bg-primary/80")}
           >
             {phase !== "idle" ? (

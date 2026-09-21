@@ -1,4 +1,4 @@
-import type { SequenceStep } from "@/lib/sequence-presets";
+import type { WizardTrack } from "@/lib/tracks";
 import type { CampaignSendSettings } from "@/lib/campaign-settings";
 
 export type WizardStepKey = "configure" | "source" | "review" | "sequences" | "launch";
@@ -60,11 +60,14 @@ export interface WizardState {
   sourceTab: "lusha" | "import";
   leads: WizardLead[];
   selectedLeadIds: Set<string>;
-  sequenceSteps: SequenceStep[];
-  // Namespaced keys from sequence-library: "builtin:<key>" for what
-  // ships with the app, "org:<uuid>" for the workspace's own.
-  verticalKey: string;
-  presetKey: string;
+  // The sequences in this campaign, one per audience (see lib/tracks.ts).
+  // A single track is the ordinary one-sequence campaign.
+  tracks: WizardTrack[];
+  activeTrackKey: string | null;
+  // Where leads whose title matches no track go; null leaves them out.
+  defaultTrackKey: string | null;
+  // Lead key (lowercased email) → track key, for leads moved by hand.
+  trackOverrides: Record<string, string>;
   campaignId: string | null;
   // When and how fast this campaign sends (see campaign-settings.ts).
   sendSettings: CampaignSendSettings;

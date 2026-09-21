@@ -185,11 +185,24 @@ Deno.serve(async (req) => {
       const { data: leads } = await sb
         .from("leads")
         .select(
-          "id, smartlead_lead_id, org_id, first_name, last_name, company, job_title, email, synced_to_odoo, odoo_lead_id, email_delivered, email_opened, email_clicked, replied_at",
+          "id, smartlead_lead_id, track_id, org_id, first_name, last_name, company, job_title, email, synced_to_odoo, odoo_lead_id, email_delivered, email_opened, email_clicked, replied_at",
         )
         .eq("campaign_id", (campaign as any).id)
         .not("smartlead_lead_id", "is", null);
       if (!leads || leads.length === 0) continue;
+
+      // With several sequences, each lead lives in its own sequence's
+      // SmartLead campaign, not the campaign-level one — asking the wrong
+      // campaign for a lead's history returns nothing.
+      const { data: tracks } = await sb
+        .from("campaign_tracks")
+        .select("id, smartlead_campaign_id")
+        .eq("campaign_id", (campaign as any).id);
+      const slIdByTrack = new Map<string, string>(
+        ((tracks ?? []) as any[])
+          .filter((t) => t.smartlead_campaign_id)
+          .map((t) => [t.id, t.smartlead_campaign_id]),
+      );
 
       // Resolved once per campaign rather than per lead — every lead in a
       // campaign is attributed to whoever created that campaign.
@@ -204,10 +217,13 @@ Deno.serve(async (req) => {
       }
 
       for (const lead of leads as any[]) {
+        const slCampaignId =
+          (lead.track_id && slIdByTrack.get(lead.track_id)) ||
+          (campaign as any).smartlead_campaign_id;
         await syncLead(
           sb,
           smartleadKey,
-          (campaign as any).smartlead_campaign_id,
+          slCampaignId,
           lead,
           (campaign as any).name ?? "Campaign",
           odooUserId,
