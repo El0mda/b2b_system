@@ -925,16 +925,25 @@ function LushaTab({
               onBlur={() => setTimeout(() => setJobTitleSuggestions([]), 200)}
               placeholder="Click to browse or search job titles..."
               onKeyDown={(e) => {
-                if (e.key === "Enter" && jobTitleSuggestions.length > 0) {
+                const typed = jobTitleInput.trim();
+                if (e.key === "Enter" && (typed || jobTitleSuggestions.length > 0)) {
                   e.preventDefault();
-                  const s = jobTitleSuggestions[0];
+                  // Enter used to add Lusha's first suggestion, which is often
+                  // not what was typed ("general manager" → "General IT
+                  // Manager"). Prefer an exact match, then the typed text
+                  // itself; fall back to the first suggestion only when
+                  // nothing was typed.
+                  const exact = jobTitleSuggestions.find(
+                    (o) => o.name.toLowerCase() === typed.toLowerCase(),
+                  );
+                  const title = exact?.name ?? (typed || jobTitleSuggestions[0]?.name);
                   const current = filters.job_titles ?? [];
-                  if (!current.includes(s.name)) {
+                  if (title && !current.includes(title)) {
                     setState((p) => ({
                       ...p,
                       lushaFilters: {
                         ...p.lushaFilters,
-                        job_titles: [...(p.lushaFilters.job_titles ?? []), s.name],
+                        job_titles: [...(p.lushaFilters.job_titles ?? []), title],
                       },
                     }));
                   }
