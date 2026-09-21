@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { Search, Settings, UsersRound, ArrowRight, CornerDownLeft, Mail } from "lucide-react";
+import { Search, Settings, UsersRound, ArrowRight, CornerDownLeft, Mail, Upload } from "lucide-react";
 import { NAV } from "@/components/layout/nav-items";
 import { cn } from "@/lib/utils";
 
@@ -13,6 +13,7 @@ interface Command {
 
 const EXTRA_COMMANDS: Command[] = [
   { label: "New Campaign", to: "/campaigns/new", icon: ArrowRight, hint: "Create" },
+  { label: "Import Leads", to: "/import", icon: Upload, hint: "Leads" },
   { label: "Sender Accounts", to: "/sender-accounts", icon: Mail, hint: "Sending" },
   { label: "Team", to: "/team", icon: UsersRound },
 ];

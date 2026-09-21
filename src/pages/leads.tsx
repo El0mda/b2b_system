@@ -2,9 +2,11 @@ import { useState, useMemo } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { format } from "date-fns";
 import { toast } from "sonner";
+import { Link } from "react-router-dom";
 import {
   Search,
   Download,
+  Upload,
   Eye,
   MousePointerClick,
   MessageSquare,
@@ -221,9 +223,18 @@ export default function LeadsPage() {
           <h2 className="text-2xl font-bold">Leads</h2>
           <span className="rounded-full bg-muted px-3 py-1 text-sm font-medium">{allLeads.length}</span>
         </div>
-        <Button variant="outline" onClick={handleExport}>
-          <Download className="h-4 w-4" /> Export CSV
-        </Button>
+        <div className="flex flex-wrap gap-2">
+          {/* Import lives here rather than in the main menu: it's how
+              leads get into this list. */}
+          <Button asChild>
+            <Link to="/import">
+              <Upload className="h-4 w-4" /> Import leads
+            </Link>
+          </Button>
+          <Button variant="outline" onClick={handleExport}>
+            <Download className="h-4 w-4" /> Export CSV
+          </Button>
+        </div>
       </div>
 
       <div className="grid gap-4 sm:grid-cols-2">

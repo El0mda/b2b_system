@@ -2,7 +2,6 @@ import {
   LayoutDashboard,
   Rocket,
   Users,
-  Upload,
   BarChart3,
   Kanban,
   Layers,
@@ -25,6 +24,5 @@ export const NAV: NavItem[] = [
   { label: "Sequences", to: "/sequences", icon: Layers },
   { label: "Pipeline", to: "/crm", icon: Kanban },
   { label: "Tasks", to: "/tasks", icon: ListChecks },
-  { label: "Import", to: "/import", icon: Upload },
   { label: "Analytics", to: "/analytics", icon: BarChart3 },
 ];

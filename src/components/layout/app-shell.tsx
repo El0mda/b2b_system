@@ -62,8 +62,12 @@ export function AppShell({ children }: { children: ReactNode }) {
     navigate("/login");
   };
 
+  // Import has no menu item of its own — it's part of Leads, so the Leads
+  // tab stays highlighted while importing.
   const isActive = (to: string) =>
-    location.pathname === to || (to !== "/dashboard" && location.pathname.startsWith(to));
+    location.pathname === to ||
+    (to !== "/dashboard" && location.pathname.startsWith(to)) ||
+    (to === "/leads" && location.pathname.startsWith("/import"));
 
   return (
     <div className="flex min-h-screen flex-col bg-background">
