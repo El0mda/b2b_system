@@ -4,7 +4,7 @@
 import { useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { format, formatDistanceToNow } from "date-fns";
-import { PhoneCall, Check, Clock, SkipForward, Search, CheckCircle2 } from "lucide-react";
+import { PhoneCall, Check, Clock, SkipForward, Search, CheckCircle2, RotateCcw } from "lucide-react";
 
 import { useAuth } from "@/hooks/use-auth";
 import { Card, CardContent } from "@/components/ui/card";
@@ -13,6 +13,7 @@ import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
 import { Switch } from "@/components/ui/switch";
+import { Checkbox } from "@/components/ui/checkbox";
 import { FullPageSpinner } from "@/components/ui/spinner";
 import {
   isDue,
@@ -41,7 +42,7 @@ export default function TasksPage() {
     userId: profile?.id ?? null,
     includeDone: true,
   });
-  const { complete, skip, snooze } = useCallTaskActions(orgId);
+  const { complete, reopen, skip, snooze } = useCallTaskActions(orgId);
 
   const counts = useMemo(() => {
     let due = 0;
@@ -134,6 +135,7 @@ export default function TasksPage() {
                   task={task}
                   now={now}
                   onDone={() => complete.mutate({ id: task.id })}
+                  onReopen={() => reopen.mutate(task.id)}
                   onSkip={() => skip.mutate(task.id)}
                   onSnooze={(hours) => snooze.mutate({ id: task.id, hours })}
                 />
@@ -182,12 +184,14 @@ function TaskRow({
   task,
   now,
   onDone,
+  onReopen,
   onSkip,
   onSnooze,
 }: {
   task: CallTask;
   now: number;
   onDone: () => void;
+  onReopen: () => void;
   onSkip: () => void;
   onSnooze: (hours: number) => void;
 }) {
@@ -200,16 +204,25 @@ function TaskRow({
 
   return (
     <div className="flex flex-wrap items-start gap-4 border-b border-border p-4 last:border-b-0">
-      <PhoneCall
-        className={cn(
-          "mt-0.5 h-5 w-5 shrink-0",
-          task.status !== "pending"
-            ? "text-muted-foreground/40"
-            : overdue
-              ? "text-amber-500"
-              : "text-muted-foreground",
-        )}
-      />
+      <div className="flex items-center gap-2 pt-0.5">
+        <Checkbox
+          id={`task-${task.id}`}
+          checked={task.status === "done"}
+          onCheckedChange={(next) => (next ? onDone() : onReopen())}
+          aria-label={task.status === "done" ? "Mark as not done yet" : "Mark as done"}
+          className="h-5 w-5"
+        />
+        <PhoneCall
+          className={cn(
+            "h-4 w-4 shrink-0",
+            task.status !== "pending"
+              ? "text-muted-foreground/40"
+              : overdue
+                ? "text-amber-500"
+                : "text-muted-foreground",
+          )}
+        />
+      </div>
 
       <div className="min-w-0 flex-1">
         <div className="flex flex-wrap items-center gap-2">
@@ -283,6 +296,15 @@ function TaskRow({
           </Button>
           <Button variant="ghost" size="sm" onClick={onSkip}>
             <SkipForward className="h-3.5 w-3.5" /> Skip
+          </Button>
+        </div>
+      )}
+
+      {task.status !== "pending" && (
+        <div className="flex flex-wrap gap-1.5">
+          <Button variant="outline" size="sm" onClick={onReopen}>
+            <RotateCcw className="h-3.5 w-3.5" />
+            {task.status === "done" ? "Not done yet" : "Reopen"}
           </Button>
         </div>
       )}

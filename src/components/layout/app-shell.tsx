@@ -7,6 +7,7 @@ import { NAV } from "@/components/layout/nav-items";
 import { ThemeToggle } from "@/components/layout/theme-toggle";
 import { CommandPalette } from "@/components/layout/command-palette";
 import { NotificationBell } from "@/components/layout/notification-bell";
+import { isDue, useCallTasks, useNow } from "@/lib/call-tasks";
 import { DropdownMenu, DropdownItem } from "@/components/ui/dropdown-menu";
 import { cn } from "@/lib/utils";
 import logo from "@/assets/company_logo.png";
@@ -21,6 +22,15 @@ export function AppShell({ children }: { children: ReactNode }) {
   // Workspace settings are the owner's — admins and members don't get a
   // link to a page that would only refuse them.
   const isOwner = profile?.role === "owner";
+
+  // Calls due right now, shown on the Tasks menu item. Same query as the
+  // bell, so it's served from the shared cache rather than fetched twice.
+  const { data: myTasks = [] } = useCallTasks(organization?.id, {
+    mineOnly: true,
+    userId: profile?.id ?? null,
+  });
+  const now = useNow();
+  const dueCount = myTasks.filter((t) => isDue(t, now)).length;
 
   const initials = (profile?.full_name || profile?.email || "U")
     .split(" ")
@@ -76,6 +86,11 @@ export function AppShell({ children }: { children: ReactNode }) {
                 >
                   <Icon className="h-3.5 w-3.5" />
                   {item.label}
+                  {item.to === "/tasks" && dueCount > 0 && (
+                    <span className="rounded-full bg-destructive px-1.5 text-[10px] font-semibold leading-4 text-destructive-foreground">
+                      {dueCount > 99 ? "99+" : dueCount}
+                    </span>
+                  )}
                 </NavLink>
               );
             })}
@@ -197,6 +212,11 @@ export function AppShell({ children }: { children: ReactNode }) {
                   >
                     <Icon className="h-4 w-4" />
                     {item.label}
+                    {item.to === "/tasks" && dueCount > 0 && (
+                      <span className="ml-auto rounded-full bg-destructive px-1.5 text-[10px] font-semibold leading-4 text-destructive-foreground">
+                        {dueCount > 99 ? "99+" : dueCount}
+                      </span>
+                    )}
                   </NavLink>
                 );
               })}

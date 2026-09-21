@@ -111,9 +111,35 @@ export function useCallTaskActions(orgId: string | undefined) {
         .eq("id", id);
       if (error) throw error;
     },
+    onSuccess: (_r, { id }) => {
+      invalidate();
+      toast.success("Call marked done", {
+        action: { label: "Undo", onClick: () => reopen.mutate(id) },
+      });
+    },
+    onError: (e: any) => toast.error(e?.message || "Couldn't update the task"),
+  });
+
+  // "Not done yet": puts a done or skipped call back on the list, due
+  // again immediately. Needed for mis-clicks, and for a call that was
+  // ticked off before it actually happened.
+  const reopen = useMutation({
+    mutationFn: async (id: string) => {
+      const { error } = await supabase
+        .from("call_tasks")
+        .update({
+          status: "pending",
+          completed_at: null,
+          outcome: null,
+          snoozed_until: null,
+          updated_at: new Date().toISOString(),
+        })
+        .eq("id", id);
+      if (error) throw error;
+    },
     onSuccess: () => {
       invalidate();
-      toast.success("Call marked done");
+      toast.success("Marked as not done yet");
     },
     onError: (e: any) => toast.error(e?.message || "Couldn't update the task"),
   });
@@ -151,7 +177,7 @@ export function useCallTaskActions(orgId: string | undefined) {
     onError: (e: any) => toast.error(e?.message || "Couldn't snooze the task"),
   });
 
-  return { complete, skip, snooze };
+  return { complete, reopen, skip, snooze };
 }
 
 // Desktop notifications need a user gesture to ask for permission, so
