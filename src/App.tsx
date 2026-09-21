@@ -17,6 +17,7 @@ import LeadsPage from "@/pages/leads";
 import SequencesPage from "@/pages/sequences";
 import SenderAccountsPage from "@/pages/sender-accounts";
 import TasksPage from "@/pages/tasks";
+import InboxPage from "@/pages/inbox";
 import CrmPage from "@/pages/crm";
 import AnalyticsPage from "@/pages/analytics";
 
@@ -117,6 +118,14 @@ export default function App() {
         element={
           <AuthGate>
             <SequencesPage />
+          </AuthGate>
+        }
+      />
+      <Route
+        path="/inbox"
+        element={
+          <AuthGate>
+            <InboxPage />
           </AuthGate>
         }
       />

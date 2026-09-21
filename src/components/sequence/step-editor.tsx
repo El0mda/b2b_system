@@ -3,7 +3,7 @@
 // template that behaved differently from the campaign it seeds would be
 // a trap.
 import { useRef, useState } from "react";
-import { Plus, Trash2, Mail, PhoneCall, ImagePlus, Film, X, Loader2 } from "lucide-react";
+import { Plus, Trash2, Mail, PhoneCall, MessageCircle, ImagePlus, Film, X, Loader2 } from "lucide-react";
 import { toast } from "sonner";
 
 import { Card, CardContent } from "@/components/ui/card";
@@ -39,10 +39,21 @@ export function SequenceStepList({
   const removeStep = (idx: number) =>
     onChange(steps.filter((_, i) => i !== idx).map((s, i) => ({ ...s, step: i + 1 })));
 
-  const addStep = (type: "email" | "call") =>
+  const addStep = (type: "email" | "call" | "whatsapp") =>
     onChange([
       ...steps,
-      type === "call"
+      type === "whatsapp"
+        ? {
+            step: steps.length + 1,
+            type: "whatsapp",
+            delay_days: 1,
+            delay_hours: 0,
+            subject: "",
+            body: "",
+            title: "WhatsApp {{first_name}} at {{company}}",
+            notes: "Hi {{first_name}}, I sent you an email about {{company}} — is WhatsApp easier to chat on?",
+          }
+        : type === "call"
         ? {
             step: steps.length + 1,
             type: "call",
@@ -73,7 +84,7 @@ export function SequenceStepList({
         />
       ))}
 
-      <div className="grid gap-2 sm:grid-cols-2">
+      <div className="grid gap-2 sm:grid-cols-3">
         <Button variant="outline" onClick={() => addStep("email")}>
           <Plus className="h-4 w-4" />
           <Mail className="h-4 w-4" />
@@ -83,6 +94,11 @@ export function SequenceStepList({
           <Plus className="h-4 w-4" />
           <PhoneCall className="h-4 w-4" />
           Add call step
+        </Button>
+        <Button variant="outline" onClick={() => addStep("whatsapp")}>
+          <Plus className="h-4 w-4" />
+          <MessageCircle className="h-4 w-4" />
+          Add WhatsApp step
         </Button>
       </div>
     </div>
@@ -114,7 +130,15 @@ function SequenceStepCard({
   const kind = stepType(step);
 
   return (
-    <Card className={kind === "call" ? "border-amber-500/40" : undefined}>
+    <Card
+      className={
+        kind === "call"
+          ? "border-amber-500/40"
+          : kind === "whatsapp"
+            ? "border-emerald-500/40"
+            : undefined
+      }
+    >
       <CardContent className="space-y-4 p-5">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <div className="flex items-center gap-2">
@@ -123,6 +147,10 @@ function SequenceStepCard({
               <Badge variant="warning">
                 <PhoneCall className="h-3 w-3" /> Call
               </Badge>
+            ) : kind === "whatsapp" ? (
+              <Badge variant="success">
+                <MessageCircle className="h-3 w-3" /> WhatsApp
+              </Badge>
             ) : (
               <Badge variant="secondary">
                 <Mail className="h-3 w-3" /> Email
@@ -130,7 +158,7 @@ function SequenceStepCard({
             )}
             {(step.delay_days || 0) + (step.delay_hours || 0) === 0 ? (
               <Badge variant="success">
-                {kind === "call" ? "Due at launch" : "Sent immediately"}
+                {kind === "email" ? "Sent immediately" : "Due at launch"}
               </Badge>
             ) : (
               <span className="text-sm text-muted-foreground">
@@ -149,7 +177,7 @@ function SequenceStepCard({
         {/* Step 1 email goes out at launch, so it has no delay to set —
             but a call placed first is scheduled off the launch time and
             does. */}
-        {(!isFirst || kind === "call") && (
+        {(!isFirst || kind !== "email") && (
           <div className="flex flex-wrap gap-3">
             <div className="space-y-1.5">
               <Label htmlFor={`${idPrefix}-delay-${index}`}>
@@ -179,7 +207,28 @@ function SequenceStepCard({
           </div>
         )}
 
-        {kind === "call" ? (
+        {kind === "whatsapp" ? (
+          <>
+            <div className="space-y-1.5">
+              <Label htmlFor={`${idPrefix}-notes-${index}`}>WhatsApp message</Label>
+              <textarea
+                id={`${idPrefix}-notes-${index}`}
+                value={step.notes ?? ""}
+                onChange={(e) => onChange({ notes: e.target.value })}
+                placeholder="Hi {{first_name}}, I sent you an email about {{company}}…"
+                rows={4}
+                className="flex w-full rounded-md border border-input bg-background px-3 py-2 text-sm shadow-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1"
+              />
+              <ChipRow onInsert={(t) => insertToken("notes", t)} />
+            </div>
+            <p className="text-xs text-muted-foreground">
+              WhatsApp messages are sent by you, not automatically. At this point in the cadence
+              each lead becomes a task with an "Open WhatsApp" button — the chat opens with this
+              message already typed, personalised for that lead. Leads need a phone number with a
+              country code.
+            </p>
+          </>
+        ) : kind === "call" ? (
           <>
             <div className="space-y-1.5">
               <Label htmlFor={`${idPrefix}-title-${index}`}>Task title</Label>

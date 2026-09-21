@@ -8,6 +8,7 @@ import { ThemeToggle } from "@/components/layout/theme-toggle";
 import { CommandPalette } from "@/components/layout/command-palette";
 import { NotificationBell } from "@/components/layout/notification-bell";
 import { isDue, useCallTasks, useNow } from "@/lib/call-tasks";
+import { isUnread, useConversations } from "@/lib/inbox";
 import { DropdownMenu, DropdownItem } from "@/components/ui/dropdown-menu";
 import { cn } from "@/lib/utils";
 import logo from "@/assets/company_logo.png";
@@ -31,6 +32,10 @@ export function AppShell({ children }: { children: ReactNode }) {
   });
   const now = useNow();
   const dueCount = myTasks.filter((t) => isDue(t, now)).length;
+  // Unread replies, from the same query the Inbox page uses.
+  const { data: conversations = [] } = useConversations(organization?.id);
+  const unreadCount = conversations.filter(isUnread).length;
+  const badges: Record<string, number> = { "/tasks": dueCount, "/inbox": unreadCount };
 
   const initials = (profile?.full_name || profile?.email || "U")
     .split(" ")
@@ -86,9 +91,9 @@ export function AppShell({ children }: { children: ReactNode }) {
                 >
                   <Icon className="h-3.5 w-3.5" />
                   {item.label}
-                  {item.to === "/tasks" && dueCount > 0 && (
+                  {(badges[item.to] ?? 0) > 0 && (
                     <span className="rounded-full bg-destructive px-1.5 text-[10px] font-semibold leading-4 text-destructive-foreground">
-                      {dueCount > 99 ? "99+" : dueCount}
+                      {badges[item.to] > 99 ? "99+" : badges[item.to]}
                     </span>
                   )}
                 </NavLink>
@@ -212,9 +217,9 @@ export function AppShell({ children }: { children: ReactNode }) {
                   >
                     <Icon className="h-4 w-4" />
                     {item.label}
-                    {item.to === "/tasks" && dueCount > 0 && (
+                    {(badges[item.to] ?? 0) > 0 && (
                       <span className="ml-auto rounded-full bg-destructive px-1.5 text-[10px] font-semibold leading-4 text-destructive-foreground">
-                        {dueCount > 99 ? "99+" : dueCount}
+                        {badges[item.to] > 99 ? "99+" : badges[item.to]}
                       </span>
                     )}
                   </NavLink>

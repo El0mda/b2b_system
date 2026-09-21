@@ -120,7 +120,9 @@ function buildEmailSteps(rows: SequenceRow[]): EmailStep[] {
   let carriedHours = 0;
   for (const row of rows) {
     const hours = (row.delay_days ?? 0) * 24 + (row.delay_hours ?? 0);
-    if (row.step_type === "call") {
+    // Call and WhatsApp steps are done by a person, not SmartLead —
+    // anything that isn't an email is skipped, its wait carried forward.
+    if ((row.step_type ?? "email") !== "email") {
       carriedHours += hours;
       continue;
     }

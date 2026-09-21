@@ -139,7 +139,10 @@ export function parseSteps(value: unknown): SequenceStep[] {
         step: typeof s.step === "number" ? s.step : i + 1,
         // Anything not explicitly a call is an email, which also covers
         // every template saved before call steps existed.
-        type: s.type === "call" ? ("call" as const) : ("email" as const),
+        type:
+          s.type === "call" || s.type === "whatsapp"
+            ? (s.type as "call" | "whatsapp")
+            : ("email" as const),
         delay_days: typeof s.delay_days === "number" ? s.delay_days : 0,
         delay_hours: typeof s.delay_hours === "number" ? s.delay_hours : 0,
         subject: typeof s.subject === "string" ? s.subject : "",

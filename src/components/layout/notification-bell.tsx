@@ -3,7 +3,8 @@
 import { useCallback, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import { formatDistanceToNow } from "date-fns";
-import { Bell, PhoneCall, Check, Clock, BellRing, ArrowRight } from "lucide-react";
+import { Bell, PhoneCall, MessageCircle, Check, Clock, BellRing, ArrowRight } from "lucide-react";
+import { WhatsappButton } from "@/components/tasks/whatsapp-button";
 
 import { useAuth } from "@/hooks/use-auth";
 import {
@@ -71,7 +72,7 @@ export function NotificationBell() {
         <div className="flex max-h-[70vh] flex-col">
           <div className="flex items-center justify-between border-b border-border px-4 py-3">
             <div>
-              <p className="text-sm font-semibold">Call reminders</p>
+              <p className="text-sm font-semibold">Reminders</p>
               <p className="text-xs text-muted-foreground">
                 {due.length > 0
                   ? `${due.length} due now`
@@ -152,9 +153,15 @@ function TaskRow({
   return (
     <div className="border-b border-border px-4 py-3 last:border-b-0">
       <div className="flex items-start gap-2">
-        <PhoneCall
-          className={cn("mt-0.5 h-4 w-4 shrink-0", overdue ? "text-amber-500" : "text-muted-foreground")}
-        />
+        {task.task_type === "whatsapp" ? (
+          <MessageCircle
+            className={cn("mt-0.5 h-4 w-4 shrink-0", overdue ? "text-emerald-500" : "text-muted-foreground")}
+          />
+        ) : (
+          <PhoneCall
+            className={cn("mt-0.5 h-4 w-4 shrink-0", overdue ? "text-amber-500" : "text-muted-foreground")}
+          />
+        )}
         <div className="min-w-0 flex-1">
           <p className="truncate text-sm font-medium">{task.title}</p>
           <p className="truncate text-xs text-muted-foreground">
@@ -170,13 +177,19 @@ function TaskRow({
           >
             {dueDate.getTime() <= now ? `Due ${when}` : `Due ${when}`}
           </p>
-          {task.leads?.phone && (
-            <a
-              href={`tel:${task.leads.phone}`}
-              className="mt-1 inline-block text-xs font-medium text-primary hover:underline"
-            >
-              {task.leads.phone}
-            </a>
+          {task.task_type === "whatsapp" ? (
+            <div className="mt-1.5">
+              <WhatsappButton phone={task.leads?.phone} message={task.notes} size="sm" />
+            </div>
+          ) : (
+            task.leads?.phone && (
+              <a
+                href={`tel:${task.leads.phone}`}
+                className="mt-1 inline-block text-xs font-medium text-primary hover:underline"
+              >
+                {task.leads.phone}
+              </a>
+            )
           )}
           {overdue && (
             <div className="mt-2 flex flex-wrap gap-1.5">

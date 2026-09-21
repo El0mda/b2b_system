@@ -90,7 +90,14 @@ async function syncLead(
 
   const updates: Record<string, unknown> = {};
   const sent = history.filter((h) => h.type === "SENT");
-  const reply = history.find((h) => h.type === "REPLY");
+  const replies = history
+    .filter((h) => h.type === "REPLY")
+    .sort((a, b) => new Date(a.time).getTime() - new Date(b.time).getTime());
+  // replied_at stays the FIRST reply (analytics count and time from it);
+  // last_reply_at is the newest, which is what the inbox needs to notice
+  // a follow-up reply at all.
+  const reply = replies[0];
+  const latestReply = replies[replies.length - 1];
 
   if (sent.length > 0) updates.email_delivered = true;
   const anyOpened = sent.some((h) => (h.open_count ?? 0) > 0);
@@ -105,7 +112,9 @@ async function syncLead(
   }
   if (reply) {
     updates.replied_at = reply.time;
-    updates.reply_text = stripReplyHtml(reply.email_body ?? "");
+    updates.last_reply_at = latestReply.time;
+    // The newest reply is what a salesperson needs to read first.
+    updates.reply_text = stripReplyHtml(latestReply.email_body ?? "");
   }
 
   if (Object.keys(updates).length > 0) {

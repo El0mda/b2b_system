@@ -159,6 +159,9 @@ Deno.serve(async (req) => {
         break;
       case "EMAIL_REPLIED":
         updates.replied_at = now;
+        // Every reply is the newest one when it arrives; this is what the
+        // inbox uses to flag a conversation as having unread activity.
+        updates.last_reply_at = now;
         updates.reply_text = body.reply?.body ?? null;
         break;
       case "EMAIL_BOUNCED":

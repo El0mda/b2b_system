@@ -4,7 +4,8 @@
 import { useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { format, formatDistanceToNow } from "date-fns";
-import { PhoneCall, Check, Clock, SkipForward, Search, CheckCircle2, RotateCcw } from "lucide-react";
+import { PhoneCall, MessageCircle, Check, Clock, SkipForward, Search, CheckCircle2, RotateCcw } from "lucide-react";
+import { WhatsappButton } from "@/components/tasks/whatsapp-button";
 
 import { useAuth } from "@/hooks/use-auth";
 import { Card, CardContent } from "@/components/ui/card";
@@ -83,9 +84,9 @@ export default function TasksPage() {
     <div className="space-y-6">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h2 className="text-2xl font-bold">Call tasks</h2>
+          <h2 className="text-2xl font-bold">Tasks</h2>
           <p className="text-sm text-muted-foreground">
-            Created by the call steps in your sequences. Reminders keep coming until each one is
+            Created by the call and WhatsApp steps in your sequences. Reminders keep coming until each one is
             done or skipped.
           </p>
         </div>
@@ -212,6 +213,14 @@ function TaskRow({
           aria-label={task.status === "done" ? "Mark as not done yet" : "Mark as done"}
           className="h-5 w-5"
         />
+        {task.task_type === "whatsapp" ? (
+          <MessageCircle
+            className={cn(
+              "h-4 w-4 shrink-0",
+              task.status !== "pending" ? "text-muted-foreground/40" : "text-emerald-500",
+            )}
+          />
+        ) : (
         <PhoneCall
           className={cn(
             "h-4 w-4 shrink-0",
@@ -222,6 +231,7 @@ function TaskRow({
                 : "text-muted-foreground",
           )}
         />
+        )}
       </div>
 
       <div className="min-w-0 flex-1">
@@ -273,13 +283,21 @@ function TaskRow({
               : format(dueDate, "MMM d, HH:mm")}
         </p>
 
-        {task.leads?.phone && (
-          <a
-            href={`tel:${task.leads.phone}`}
-            className="mt-1 inline-block text-sm font-medium text-primary hover:underline"
-          >
-            {task.leads.phone}
-          </a>
+        {task.task_type === "whatsapp" ? (
+          task.status === "pending" && (
+            <div className="mt-2">
+              <WhatsappButton phone={task.leads?.phone} message={task.notes} />
+            </div>
+          )
+        ) : (
+          task.leads?.phone && (
+            <a
+              href={`tel:${task.leads.phone}`}
+              className="mt-1 inline-block text-sm font-medium text-primary hover:underline"
+            >
+              {task.leads.phone}
+            </a>
+          )
         )}
       </div>
 

@@ -85,6 +85,7 @@ export type Database = {
       }
       call_tasks: {
         Row: {
+          task_type: string
           assigned_to: string | null
           campaign_id: string | null
           completed_at: string | null
@@ -104,6 +105,7 @@ export type Database = {
           updated_at: string | null
         }
         Insert: {
+          task_type?: string
           assigned_to?: string | null
           campaign_id?: string | null
           completed_at?: string | null
@@ -123,6 +125,7 @@ export type Database = {
           updated_at?: string | null
         }
         Update: {
+          task_type?: string
           assigned_to?: string | null
           campaign_id?: string | null
           completed_at?: string | null
@@ -438,6 +441,8 @@ export type Database = {
       }
       leads: {
         Row: {
+          last_reply_at: string | null
+          reply_read_at: string | null
           track_id: string | null
           added_to_campaign: boolean | null
           campaign_id: string | null
@@ -482,6 +487,8 @@ export type Database = {
           website: string | null
         }
         Insert: {
+          last_reply_at?: string | null
+          reply_read_at?: string | null
           track_id?: string | null
           added_to_campaign?: boolean | null
           campaign_id?: string | null
@@ -526,6 +533,8 @@ export type Database = {
           website?: string | null
         }
         Update: {
+          last_reply_at?: string | null
+          reply_read_at?: string | null
           track_id?: string | null
           added_to_campaign?: boolean | null
           campaign_id?: string | null

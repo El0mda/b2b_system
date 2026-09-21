@@ -4,7 +4,9 @@ import type { EmailMedia } from "@/lib/email-media";
 // team has to make. `type` is optional because every template written
 // before call steps existed is an email step, and rewriting stored
 // JSONB to say so would be busywork — read it through stepType().
-export type SequenceStepType = "email" | "call";
+// "call" and "whatsapp" are human steps: SmartLead can't send them, so
+// each becomes a task for the salesperson at its point in the cadence.
+export type SequenceStepType = "email" | "call" | "whatsapp";
 
 export interface SequenceStep {
   step: number;
@@ -23,7 +25,8 @@ export interface SequenceStep {
 }
 
 export function stepType(step: SequenceStep): SequenceStepType {
-  return step.type === "call" ? "call" : "email";
+  if (step.type === "call" || step.type === "whatsapp") return step.type;
+  return "email";
 }
 
 // A step's delay from the previous one, in hours — the single unit both
@@ -50,9 +53,20 @@ export function describeDelay(step: SequenceStep): string {
 // A step is only ready to launch when the fields its own kind needs are
 // filled in — a call has no subject line to check.
 export function isStepComplete(step: SequenceStep): boolean {
-  return stepType(step) === "call"
-    ? !!step.title?.trim()
-    : !!step.subject.trim() && !!step.body.trim();
+  switch (stepType(step)) {
+    case "call":
+      return !!step.title?.trim();
+    case "whatsapp":
+      // The message is the whole point of a WhatsApp step.
+      return !!step.notes?.trim();
+    default:
+      return !!step.subject.trim() && !!step.body.trim();
+  }
+}
+
+/** A step a person carries out (call, WhatsApp) rather than SmartLead. */
+export function isHumanStep(step: SequenceStep): boolean {
+  return stepType(step) !== "email";
 }
 
 // A vertical is the industry a sequence was written for. Copy that

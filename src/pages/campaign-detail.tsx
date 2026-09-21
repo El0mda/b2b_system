@@ -15,6 +15,7 @@ import {
   Rocket,
   Mail,
   PhoneCall,
+  MessageCircle,
   Phone,
   Globe,
   Building2,
@@ -1014,7 +1015,9 @@ function StepCards({ sequences }: { sequences: SequenceStep[] }) {
   return (
     <div className="space-y-4">
       {sequences.map((s, i) => {
-        const isCall = s.step_type === "call";
+        const isWhatsapp = s.step_type === "whatsapp";
+        // Call and WhatsApp are both steps a person does, not SmartLead.
+        const isCall = s.step_type === "call" || isWhatsapp;
         return (
           <Card key={s.id ?? i}>
             <CardContent className="p-5 space-y-3">
@@ -1023,20 +1026,30 @@ function StepCards({ sequences }: { sequences: SequenceStep[] }) {
                   <div
                     className={cn(
                       "flex h-8 w-8 items-center justify-center rounded-full text-xs font-bold",
-                      isCall ? "bg-amber-500/15 text-amber-600 dark:text-amber-400" : "bg-primary/10 text-primary",
+                      isWhatsapp
+                        ? "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400"
+                        : isCall
+                          ? "bg-amber-500/15 text-amber-600 dark:text-amber-400"
+                          : "bg-primary/10 text-primary",
                     )}
                   >
                     {s.step}
                   </div>
                   <div>
                     <p className="text-sm font-semibold">
-                      {isCall ? s.title || "Call the lead" : s.subject || "(no subject)"}
+                      {isCall
+                        ? s.title || (isWhatsapp ? "WhatsApp the lead" : "Call the lead")
+                        : s.subject || "(no subject)"}
                     </p>
                     <p className="text-xs text-muted-foreground">{describeStepDelay(s)}</p>
                   </div>
                 </div>
-                <Badge variant={isCall ? "warning" : "secondary"}>
-                  {isCall ? (
+                <Badge variant={isWhatsapp ? "success" : isCall ? "warning" : "secondary"}>
+                  {isWhatsapp ? (
+                    <>
+                      <MessageCircle className="h-3 w-3" /> WhatsApp task
+                    </>
+                  ) : isCall ? (
                     <>
                       <PhoneCall className="h-3 w-3" /> Call task
                     </>
@@ -1049,7 +1062,9 @@ function StepCards({ sequences }: { sequences: SequenceStep[] }) {
               </div>
               <div className="rounded-lg border border-border bg-muted/20 p-3">
                 <pre className="whitespace-pre-wrap text-xs text-muted-foreground">
-                  {isCall ? s.notes || "(no call script)" : s.body || "(no body)"}
+                  {isCall
+                    ? s.notes || (isWhatsapp ? "(no message)" : "(no call script)")
+                    : s.body || "(no body)"}
                 </pre>
               </div>
               {!isCall && parseMedia(s.attachments).length > 0 && (

@@ -11,6 +11,7 @@ import {
   Users,
   Mail,
   PhoneCall,
+  MessageCircle,
   CalendarClock,
   PartyPopper,
 } from "lucide-react";
@@ -292,19 +293,24 @@ export function StepLaunch({
       for (const track of state.tracks) {
         const trackId = trackIdByKey.get(track.key);
         if (!trackId) continue;
-        const sequenceRows = track.steps.map((s, i) => ({
-          campaign_id: campaign.id,
-          track_id: trackId,
-          step: i + 1,
-          step_type: stepType(s),
-          delay_days: s.delay_days ?? 0,
-          delay_hours: s.delay_hours ?? 0,
-          subject: stepType(s) === "call" ? null : s.subject,
-          body: stepType(s) === "call" ? null : s.body,
-          title: stepType(s) === "call" ? (s.title ?? "Call the lead") : null,
-          notes: stepType(s) === "call" ? (s.notes ?? null) : null,
-          attachments: stepType(s) === "call" ? [] : (s.attachments ?? []),
-        }));
+        const sequenceRows = track.steps.map((s, i) => {
+          const kind = stepType(s);
+          const human = kind !== "email";
+          return {
+            campaign_id: campaign.id,
+            track_id: trackId,
+            step: i + 1,
+            step_type: kind,
+            delay_days: s.delay_days ?? 0,
+            delay_hours: s.delay_hours ?? 0,
+            subject: human ? null : s.subject,
+            body: human ? null : s.body,
+            // For a WhatsApp step, `notes` is the message itself.
+            title: human ? (s.title?.trim() || defaultTaskTitle(kind)) : null,
+            notes: human ? (s.notes ?? null) : null,
+            attachments: human ? [] : (s.attachments ?? []),
+          };
+        });
         const { data: insertedSequences, error: seqError } = await supabase
           .from("sequences")
           .insert(sequenceRows)
@@ -554,7 +560,9 @@ export function StepLaunch({
                   </div>
                 )}
                 {track.steps.map((s, i) => {
-                  const isCall = stepType(s) === "call";
+                  const kind = stepType(s);
+                  // Any step a person does (call or WhatsApp) is "due", not "sent".
+                  const isCall = kind !== "email";
                   const offsetHours = offsetHoursThrough(track.steps, i);
                   const when = new Date(Date.now() + offsetHours * 60 * 60 * 1000);
                   const scheduled =
@@ -570,7 +578,11 @@ export function StepLaunch({
                     <div key={i} className="rounded-md border border-border p-3">
                       <div className="mb-2 flex items-center gap-2">
                         <Badge variant="info">Step {i + 1}</Badge>
-                        {isCall ? (
+                        {kind === "whatsapp" ? (
+                          <Badge variant="success">
+                            <MessageCircle className="h-3 w-3" /> WhatsApp
+                          </Badge>
+                        ) : isCall ? (
                           <Badge variant="warning">
                             <PhoneCall className="h-3 w-3" /> Call
                           </Badge>
@@ -583,12 +595,14 @@ export function StepLaunch({
                       </div>
                       <div className="text-sm font-semibold">
                         {isCall
-                          ? processTemplate(s.title ?? "", sample) || "Call the lead"
+                          ? processTemplate(s.title ?? "", sample) ||
+                            (kind === "whatsapp" ? "WhatsApp the lead" : "Call the lead")
                           : processTemplate(s.subject, sample) || "(no subject)"}
                       </div>
                       <p className="mt-1 line-clamp-3 whitespace-pre-wrap text-xs text-muted-foreground">
                         {isCall
-                          ? processTemplate(s.notes ?? "", sample) || "No call script"
+                          ? processTemplate(s.notes ?? "", sample) ||
+                            (kind === "whatsapp" ? "(no message)" : "No call script")
                           : processTemplate(s.body, sample) || "(no body)"}
                       </p>
                       {!isCall && (s.attachments?.length ?? 0) > 0 && (
@@ -838,6 +852,12 @@ function ProgressRow({
 // Fans every call step out across every lead. due_at is launch time
 // plus the cumulative delay of all steps up to and including the call,
 // which puts it on the same clock as the emails around it.
+function defaultTaskTitle(kind: "call" | "whatsapp" | "email"): string {
+  return kind === "whatsapp"
+    ? "WhatsApp {{first_name}} at {{company}}"
+    : "Call {{first_name}} at {{company}}";
+}
+
 async function createCallTasks({
   steps,
   sequences,
@@ -866,7 +886,8 @@ async function createCallTasks({
   const rows: Database["public"]["Tables"]["call_tasks"]["Insert"][] = [];
 
   steps.forEach((step, index) => {
-    if (stepType(step) !== "call") return;
+    const kind = stepType(step);
+    if (kind === "email") return;
     const sequenceRow = sequences.find((r) => r.step === index + 1);
     const dueAt = new Date(
       launchedAt + offsetHoursThrough(steps, index) * 60 * 60 * 1000,
@@ -883,9 +904,11 @@ async function createCallTasks({
         // is reassignable from the Tasks page afterwards.
         assigned_to: userId,
         created_by: userId,
+        task_type: kind,
         // Templated the same way an email subject is, so the reminder
-        // reads "Call Sara at ACME" rather than "Call the lead".
-        title: processTemplate(step.title?.trim() || "Call {{first_name}} at {{company}}", lead),
+        // reads "Call Sara at ACME" rather than "Call the lead" — and a
+        // WhatsApp message greets the lead by name.
+        title: processTemplate(step.title?.trim() || defaultTaskTitle(kind), lead),
         notes: step.notes ? processTemplate(step.notes, lead) : null,
         due_at: dueAt,
       });

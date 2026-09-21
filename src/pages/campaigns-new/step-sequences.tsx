@@ -162,7 +162,9 @@ export function StepSequences({
     if (!t.name.trim()) problems.push("Every sequence needs a name.");
     if (t.steps.length === 0) problems.push(`${label} has no steps.`);
     else if (!t.steps.every(isStepComplete))
-      problems.push(`${label} has an unfinished step — every email needs a subject and body.`);
+      problems.push(
+        `${label} has an unfinished step — emails need a subject and body, calls a title, WhatsApp steps a message.`,
+      );
     if (tracks.length > 1 && (assignment.counts.get(t.key) ?? 0) === 0)
       problems.push(
         `No leads go to ${label}. Add job positions that match your leads, move some leads to it, or remove it.`,
@@ -439,7 +441,8 @@ function TrackEditor({
   };
 
   const emails = track.steps.filter((s) => stepType(s) === "email").length;
-  const calls = track.steps.length - emails;
+  const calls = track.steps.filter((s) => stepType(s) === "call").length;
+  const whatsapps = track.steps.filter((s) => stepType(s) === "whatsapp").length;
 
   return (
     <>
@@ -464,6 +467,7 @@ function TrackEditor({
           <CardDescription>
             {emails} email{emails === 1 ? "" : "s"}
             {calls > 0 ? ` · ${calls} call${calls === 1 ? "" : "s"}` : ""}
+            {whatsapps > 0 ? ` · ${whatsapps} WhatsApp` : ""}
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">

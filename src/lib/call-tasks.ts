@@ -18,6 +18,8 @@ export interface CallTask {
   due_at: string;
   snoozed_until: string | null;
   status: string;
+  /** "call" or "whatsapp" — for WhatsApp, `notes` is the message. */
+  task_type: string;
   step: number | null;
   assigned_to: string | null;
   completed_at: string | null;
@@ -36,7 +38,7 @@ export interface CallTask {
 }
 
 const SELECT =
-  "id, title, notes, due_at, snoozed_until, status, step, assigned_to, completed_at, outcome, " +
+  "id, title, notes, due_at, snoozed_until, status, task_type, step, assigned_to, completed_at, outcome, " +
   "campaign_id, lead_id, leads(first_name, last_name, full_name, company, phone, email), " +
   "campaigns(name)";
 

@@ -16,6 +16,7 @@ import {
   X,
   Mail,
   PhoneCall,
+  MessageCircle,
   ArrowLeft,
   Briefcase,
 } from "lucide-react";
@@ -379,6 +380,12 @@ export default function SequencesPage() {
                         <span className="flex items-center gap-1">
                           <PhoneCall className="h-3.5 w-3.5" />
                           {t.steps.filter((s) => stepType(s) === "call").length} calls
+                        </span>
+                      )}
+                      {t.steps.some((s) => stepType(s) === "whatsapp") && (
+                        <span className="flex items-center gap-1">
+                          <MessageCircle className="h-3.5 w-3.5" />
+                          {t.steps.filter((s) => stepType(s) === "whatsapp").length} WhatsApp
                         </span>
                       )}
                       <span>{totalDays(t.steps)} days</span>
