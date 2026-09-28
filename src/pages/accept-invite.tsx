@@ -191,17 +191,26 @@ export default function AcceptInvitePage() {
             </h2>
             <p className="mt-1 text-sm text-muted-foreground">
               {emailMismatch
-                ? `This invite was sent to ${preview.email}, but you're signed in as ${user.email}.`
+                ? `This invite is for ${preview.email}, but this browser is signed in as ${user.email}.`
                 : "You already belong to a workspace. Multi-workspace accounts aren't supported yet."}
             </p>
+            {emailMismatch && (
+              <p className="mt-2 text-xs text-muted-foreground">
+                Signing out here signs out {user.email} on this computer. To leave that session
+                alone, open this invitation link in a private window instead.
+              </p>
+            )}
             <Button
               variant="outline"
               className="mt-5 w-full"
               onClick={async () => {
                 await signOut();
+                // Stay on the invitation so the sign-up form for the
+                // invited address comes straight up.
+                navigate(`/invite/${token}`, { replace: true });
               }}
             >
-              <LogOut className="h-4 w-4" /> Sign out and try again
+              <LogOut className="h-4 w-4" /> Sign out and continue as {preview.email}
             </Button>
           </div>
         </Shell>
