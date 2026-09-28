@@ -144,13 +144,15 @@ export async function seedBuiltinLibrary(orgId: string, userId: string | null): 
 export function templateOptions(
   verticalKey: string,
   orgTemplates: OrgTemplate[],
+  opts: { includeBuiltins?: boolean } = {},
 ): TemplateOption[] {
+  const { includeBuiltins = true } = opts;
   // An org vertical has no built-in presets of its own, so it still
   // gets the industry-agnostic ones (i.e. the blank starting point).
   const builtinKey = verticalKey.startsWith(BUILTIN_PREFIX)
     ? verticalKey.slice(BUILTIN_PREFIX.length)
     : ANY_VERTICAL;
-  const builtins = presetsForVertical(builtinKey).map((p) => ({
+  const builtins = (includeBuiltins ? presetsForVertical(builtinKey) : []).map((p) => ({
     key: BUILTIN_PREFIX + p.key,
     name: p.name,
     description: p.description,

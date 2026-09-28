@@ -118,7 +118,10 @@ export default function SequencesPage() {
   const selected = options.find((o) => o.key === selectedKey) ?? null;
   const selectedVerticalId = selected ? orgVerticalId(selected.key) : null;
   const visibleTemplates = useMemo(
-    () => (selected ? templateOptions(selected.key, templates) : []),
+    // The library lists only real, saved sequences: the code presets
+    // (including the blank "Custom" starting point) can't be edited, and
+    // "New sequence" already covers starting from scratch.
+    () => (selected ? templateOptions(selected.key, templates, { includeBuiltins: false }) : []),
     [selected, templates],
   );
 
