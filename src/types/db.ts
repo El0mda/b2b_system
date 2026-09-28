@@ -441,6 +441,7 @@ export type Database = {
       }
       leads: {
         Row: {
+          odoo_thread_synced_at: string | null
           last_reply_at: string | null
           reply_read_at: string | null
           track_id: string | null
@@ -487,6 +488,7 @@ export type Database = {
           website: string | null
         }
         Insert: {
+          odoo_thread_synced_at?: string | null
           last_reply_at?: string | null
           reply_read_at?: string | null
           track_id?: string | null
@@ -533,6 +535,7 @@ export type Database = {
           website?: string | null
         }
         Update: {
+          odoo_thread_synced_at?: string | null
           last_reply_at?: string | null
           reply_read_at?: string | null
           track_id?: string | null

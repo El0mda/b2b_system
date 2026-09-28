@@ -37,7 +37,9 @@ Deno.serve(async (req) => {
       .eq("synced_to_odoo", true)
       .not("odoo_lead_id", "is", null);
     if (orgError) return json({ error: orgError.message }, 500);
-    const orgIds = Array.from(new Set((orgRows ?? []).map((r: any) => r.org_id)));
+    const orgIds: string[] = Array.from(
+      new Set((orgRows ?? []).map((r: any) => String(r.org_id))),
+    );
 
     let leadsSynced = 0;
     let orgsSynced = 0;

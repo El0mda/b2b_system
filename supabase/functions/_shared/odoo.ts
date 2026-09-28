@@ -25,7 +25,7 @@ interface OdooLeadInput {
   odoo_lead_id?: string | null;
 }
 
-interface OdooSettings {
+export interface OdooSettings {
   url: string;
   db: string;
   userId: number;
@@ -236,6 +236,70 @@ export async function pushLeadToOdoo(
     console.error("Odoo push failed:", e);
     return false;
   }
+}
+
+export interface ThreadMessage {
+  /** "sent" = we emailed them, "reply" = they answered. */
+  type: "sent" | "reply";
+  time: string | null;
+  subject: string | null;
+  /** Plain text — the caller strips the email HTML. */
+  text: string;
+}
+
+function escapeHtml(text: string): string {
+  return text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+}
+
+export function formatThreadMessage(m: ThreadMessage, leadLabel: string): string {
+  const when = m.time ? new Date(m.time).toUTCString() : "";
+  const who = m.type === "reply" ? `Reply from ${leadLabel}` : "Email sent";
+  const subject = m.subject ? `<p><i>${escapeHtml(m.subject)}</i></p>` : "";
+  const body = escapeHtml(m.text || "(empty message)").replace(/\n/g, "<br>");
+  return (
+    `<p><b>${escapeHtml(who)}</b>${when ? ` — ${escapeHtml(when)}` : ""}</p>` +
+    subject +
+    `<div style="white-space:pre-wrap">${body}</div>`
+  );
+}
+
+/**
+ * Posts messages into a crm.lead's chatter, oldest first, so the
+ * opportunity in Odoo reads like the conversation it came from.
+ *
+ * Posted as internal notes (mail.mt_note) rather than as emails: an
+ * Odoo message posted with the default subtype can notify followers,
+ * and these are a record of mail that has already been sent.
+ *
+ * Returns the time of the last message successfully posted, so the
+ * caller can record how far Odoo has been brought up to date — a failure
+ * halfway through therefore re-sends only what didn't make it.
+ */
+export async function postThreadToOdoo(
+  settings: OdooSettings,
+  odooLeadId: number,
+  messages: ThreadMessage[],
+  leadLabel: string,
+): Promise<string | null> {
+  let lastPosted: string | null = null;
+  for (const m of messages) {
+    const res = await odooCall(
+      settings,
+      "crm.lead",
+      "message_post",
+      [[odooLeadId]],
+      {
+        body: formatThreadMessage(m, leadLabel),
+        message_type: "comment",
+        subtype_xmlid: "mail.mt_note",
+      },
+    );
+    const parsed = await parseOdooResponse(res, "message_post");
+    // parseOdooResponse logs and returns null on an Odoo-side error.
+    if (!parsed) return lastPosted;
+    lastPosted = m.time ?? lastPosted;
+  }
+  return lastPosted;
 }
 
 // Highest engagement level a lead has reached, for callers that observe

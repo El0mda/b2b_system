@@ -21,7 +21,15 @@
 
 // deno-lint-ignore-file no-explicit-any
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
-import { highestLevel, levelRank, pushLeadToOdoo } from "../_shared/odoo.ts";
+import {
+  getOdooSettings,
+  highestLevel,
+  levelRank,
+  postThreadToOdoo,
+  pushLeadToOdoo,
+  type OdooSettings,
+  type ThreadMessage,
+} from "../_shared/odoo.ts";
 
 const SMARTLEAD_API = "https://server.smartlead.ai/api/v1";
 
@@ -65,6 +73,7 @@ interface SyncableLead {
   email: string;
   synced_to_odoo: boolean | null;
   odoo_lead_id: string | null;
+  odoo_thread_synced_at: string | null;
   email_delivered: boolean | null;
   email_opened: boolean | null;
   email_clicked: boolean | null;
@@ -78,6 +87,7 @@ async function syncLead(
   lead: SyncableLead,
   campaignName: string,
   odooUserId: string | null,
+  odooSettings: OdooSettings | null,
 ): Promise<void> {
   const res = await smartleadFetch(
     `/campaigns/${slCampaignId}/leads/${lead.smartlead_lead_id}/message-history`,
@@ -119,6 +129,50 @@ async function syncLead(
 
   if (Object.keys(updates).length > 0) {
     await sb.from("leads").update(updates).eq("id", lead.id);
+  }
+
+  // Copy anything new in the conversation into the Odoo opportunity's
+  // chatter, so the salesperson reads the actual emails there rather than
+  // a one-line note. Only messages newer than the last copied one are
+  // posted — this runs every few minutes against the whole thread.
+  //
+  // A lead pushed to Odoo for the first time during this same run isn't
+  // covered here (its odoo_lead_id was written after this row was read);
+  // the next run picks it up.
+  if (odooSettings && lead.synced_to_odoo && lead.odoo_lead_id) {
+    try {
+      const since = lead.odoo_thread_synced_at
+        ? new Date(lead.odoo_thread_synced_at).getTime()
+        : 0;
+      const fresh: ThreadMessage[] = history
+        .filter((h) => h.time && new Date(h.time).getTime() > since)
+        .sort((a, b) => new Date(a.time).getTime() - new Date(b.time).getTime())
+        // A cap, so a long thread can't flood the chatter in one run.
+        .slice(0, 20)
+        .map((h) => ({
+          type: h.type === "REPLY" ? ("reply" as const) : ("sent" as const),
+          time: h.time,
+          subject: h.subject ?? null,
+          text: stripReplyHtml(h.email_body ?? ""),
+        }));
+      if (fresh.length > 0) {
+        const label =
+          `${lead.first_name ?? ""} ${lead.last_name ?? ""}`.trim() || lead.email;
+        const lastPosted = await postThreadToOdoo(
+          odooSettings,
+          Number(lead.odoo_lead_id),
+          fresh,
+          label,
+        );
+        // Recorded only as far as Odoo actually accepted, so a failure
+        // halfway through re-sends just the remainder next run.
+        if (lastPosted) {
+          await sb.from("leads").update({ odoo_thread_synced_at: lastPosted }).eq("id", lead.id);
+        }
+      }
+    } catch (e) {
+      console.error("Odoo thread sync failed:", e);
+    }
   }
 
   // Push to Odoo — mirrors smartlead-webhooks' push logic. SmartLead's
@@ -194,7 +248,7 @@ Deno.serve(async (req) => {
       const { data: leads } = await sb
         .from("leads")
         .select(
-          "id, smartlead_lead_id, track_id, org_id, first_name, last_name, company, job_title, email, synced_to_odoo, odoo_lead_id, email_delivered, email_opened, email_clicked, replied_at",
+          "id, smartlead_lead_id, track_id, org_id, first_name, last_name, company, job_title, email, synced_to_odoo, odoo_lead_id, odoo_thread_synced_at, email_delivered, email_opened, email_clicked, replied_at",
         )
         .eq("campaign_id", (campaign as any).id)
         .not("smartlead_lead_id", "is", null);
@@ -213,8 +267,10 @@ Deno.serve(async (req) => {
           .map((t) => [t.id, t.smartlead_campaign_id]),
       );
 
-      // Resolved once per campaign rather than per lead — every lead in a
-      // campaign is attributed to whoever created that campaign.
+      // Both resolved once per campaign rather than per lead.
+      const odooSettings = await getOdooSettings(sb, (leads[0] as any).org_id);
+
+      // Every lead in a campaign is attributed to whoever created it.
       let odooUserId: string | null = null;
       if ((campaign as any).created_by) {
         const { data: creator } = await sb
@@ -236,6 +292,7 @@ Deno.serve(async (req) => {
           lead,
           (campaign as any).name ?? "Campaign",
           odooUserId,
+          odooSettings,
         );
         leadsSynced++;
       }
