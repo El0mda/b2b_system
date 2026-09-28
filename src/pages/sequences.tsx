@@ -66,6 +66,23 @@ export default function SequencesPage() {
   const canManageAny = profile?.role === "owner" || profile?.role === "admin";
 
   const { verticals, templates, isLoading } = useSequenceLibrary(orgId);
+
+  // Author names for the library cards — useful now that several people
+  // edit the same sequences.
+  const { data: teamMembers = [] } = useQuery<Array<{ id: string; full_name: string | null; email: string | null }>>({
+    queryKey: ["team-names", orgId],
+    enabled: !!orgId,
+    queryFn: async () => {
+      const { data } = await supabase.from("users").select("id, full_name, email").eq("org_id", orgId!);
+      return data ?? [];
+    },
+  });
+  const authorName = (userId: string | null) => {
+    if (!userId) return null;
+    if (userId === profile?.id) return "you";
+    const m = teamMembers.find((u) => u.id === userId);
+    return m?.full_name ?? m?.email ?? null;
+  };
   const options = useMemo(() => verticalOptions(verticals), [verticals]);
 
   const [selectedKey, setSelectedKey] = useState<string>("");
@@ -86,7 +103,10 @@ export default function SequencesPage() {
     [selected, templates],
   );
 
-  const canEdit = (createdBy: string | null) =>
+  // The library is the team's: any member can edit or delete a saved
+  // sequence (migration 0024). Verticals stay restricted — deleting one
+  // deletes every sequence inside it.
+  const canEditVertical = (createdBy: string | null) =>
     canManageAny || (!!profile?.id && createdBy === profile.id);
 
   const invalidate = () => {
@@ -266,7 +286,7 @@ export default function SequencesPage() {
                 {o.description && (
                   <p className="mt-1 line-clamp-2 text-xs text-muted-foreground">{o.description}</p>
                 )}
-                {org && canEdit(org.created_by) && (
+                {org && canEditVertical(org.created_by) && (
                   <div className="mt-2 flex gap-1">
                     <Button
                       variant="ghost"
@@ -331,8 +351,9 @@ export default function SequencesPage() {
 
           {selected?.builtin && (
             <p className="rounded-lg border border-dashed border-border p-3 text-sm text-muted-foreground">
-              Built-in sequences can't be edited directly — copy one into a vertical of your own to
-              customize it.
+              Built-in sequences ship with the app, so they can't be changed in place — use "Copy
+              &amp; edit" to make your own version. Everything your team has saved can be edited by
+              anyone on the team.
             </p>
           )}
 
@@ -341,7 +362,7 @@ export default function SequencesPage() {
               const saved: OrgTemplate | undefined = t.builtin
                 ? undefined
                 : templates.find((x) => orgKey(x.id) === t.key);
-              const editable = saved ? canEdit(saved.created_by) : false;
+              const editable = !!saved;
               return (
                 <Card key={t.key}>
                   <CardContent className="space-y-3 p-4">
@@ -349,6 +370,11 @@ export default function SequencesPage() {
                       <div className="min-w-0">
                         <p className="truncate font-medium">{t.name}</p>
                         <p className="mt-0.5 text-xs text-muted-foreground">{t.description}</p>
+                        {saved && authorName(saved.created_by) && (
+                          <p className="mt-0.5 text-xs text-muted-foreground">
+                            Added by {authorName(saved.created_by)}
+                          </p>
+                        )}
                       </div>
                       {t.builtin && (
                         <Badge variant="secondary">
@@ -497,7 +523,7 @@ function CopyToVerticalButton({
   return (
     <>
       <Button variant="outline" size="sm" onClick={() => setOpen(true)}>
-        <Copy className="h-3.5 w-3.5" /> Copy
+        <Copy className="h-3.5 w-3.5" /> Copy &amp; edit
       </Button>
       <Dialog open={open} onClose={() => setOpen(false)}>
         <DialogHeader>
