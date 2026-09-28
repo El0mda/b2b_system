@@ -94,19 +94,21 @@ export function normalizeHistory(history: any[]): Message[] {
 /**
  * The payload for SmartLead's reply-email-thread.
  *
- * SmartLead's two sets of docs list different fields for this call — one
- * shows lead_id / email_body / reply_message_id / reply_email_time, the
- * other also email_stats_id / reply_email_body / add_signature. Sending
- * every field either names (from the message being answered) is harmless
- * where extra, and avoids a rejection where required.
+ * SmartLead's docs disagree with SmartLead's API: their older reference
+ * lists lead_id, and the API rejects it outright
+ * ("\"lead_id\" is not allowed"). The thread is identified by the
+ * message being answered, not by the lead.
+ *
+ * Because the accepted set isn't reliably documented, sendReply below
+ * strips any field the API names in a 400 and retries, so one more
+ * disagreement costs a retry rather than a failed reply.
  */
 export function buildReplyPayload(
-  slLeadId: string,
+  _slLeadId: string,
   target: any,
   bodyText: string,
 ): Record<string, unknown> {
   const payload: Record<string, unknown> = {
-    lead_id: Number.isNaN(Number(slLeadId)) ? slLeadId : Number(slLeadId),
     email_body: escapeHtml(bodyText.trim()).replace(/\n/g, "<br>"),
     email_stats_id: target?.stats_id ?? target?.email_stats_id,
     reply_message_id: target?.message_id ?? target?.messageId,
@@ -118,6 +120,46 @@ export function buildReplyPayload(
     if (payload[k] === undefined || payload[k] === null) delete payload[k];
   }
   return payload;
+}
+
+/**
+ * Posts the reply, and retries without any field SmartLead rejects.
+ *
+ * Their validation errors name the offending keys
+ * (validation.keys: ["lead_id"]), so an unexpected field costs a retry
+ * instead of a failed reply. Capped at a few attempts, and it never adds
+ * fields — only removes them.
+ */
+async function sendReply(
+  slCampaignId: string,
+  payload: Record<string, unknown>,
+  smartleadKey: string,
+): Promise<{ ok: boolean; status: number; body: string }> {
+  const body = { ...payload };
+  for (let attempt = 0; attempt < 4; attempt++) {
+    const res = await smartleadFetch(`/campaigns/${slCampaignId}/reply-email-thread`, smartleadKey, {
+      method: "POST",
+      body: JSON.stringify(body),
+    });
+    const text = await res.text();
+    if (res.ok) return { ok: true, status: res.status, body: text };
+    if (res.status !== 400) return { ok: false, status: res.status, body: text };
+
+    let rejected: string[] = [];
+    try {
+      const parsed = JSON.parse(text);
+      const keys = parsed?.validation?.keys;
+      if (Array.isArray(keys)) rejected = keys.filter((k: unknown) => typeof k === "string");
+    } catch {
+      // Not the validation shape — nothing to strip.
+    }
+    // Only drop keys we actually sent, or this would loop without changing.
+    const droppable = rejected.filter((k) => k in body);
+    if (droppable.length === 0) return { ok: false, status: res.status, body: text };
+    for (const k of droppable) delete body[k];
+    console.warn(`SmartLead rejected ${droppable.join(", ")} — retrying without`);
+  }
+  return { ok: false, status: 400, body: "SmartLead kept rejecting the reply fields" };
 }
 
 Deno.serve(async (req) => {
@@ -204,16 +246,13 @@ Deno.serve(async (req) => {
     if (!target) return json({ error: "This lead hasn't replied — there's nothing to answer yet." }, 400);
 
     const payload = buildReplyPayload(String(lead.smartlead_lead_id), target.raw, text);
-    const replyRes = await smartleadFetch(`/campaigns/${slCampaignId}/reply-email-thread`, smartleadKey, {
-      method: "POST",
-      body: JSON.stringify(payload),
-    });
-    const replyText = await replyRes.text();
-    if (!replyRes.ok) {
-      // SmartLead's own message, verbatim — this call's required fields
-      // aren't documented consistently, so the exact reason matters.
-      console.error("SmartLead reply failed:", replyRes.status, replyText, Object.keys(payload));
-      return json({ error: `SmartLead didn't send the reply (${replyRes.status}): ${replyText.slice(0, 300)}` }, 502);
+    const sent = await sendReply(slCampaignId, payload, smartleadKey);
+    if (!sent.ok) {
+      console.error("SmartLead reply failed:", sent.status, sent.body);
+      return json(
+        { error: `SmartLead didn't send the reply (${sent.status}): ${sent.body.slice(0, 300)}` },
+        502,
+      );
     }
 
     // Best-effort bookkeeping: replying counts as reading, and the team
