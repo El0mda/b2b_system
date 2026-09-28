@@ -330,6 +330,7 @@ export type Database = {
       }
       imports: {
         Row: {
+          created_by: string | null
           campaign_id: string | null
           created_at: string | null
           duplicate_rows: number | null
@@ -344,6 +345,7 @@ export type Database = {
           total_rows: number | null
         }
         Insert: {
+          created_by?: string | null
           campaign_id?: string | null
           created_at?: string | null
           duplicate_rows?: number | null
@@ -358,6 +360,7 @@ export type Database = {
           total_rows?: number | null
         }
         Update: {
+          created_by?: string | null
           campaign_id?: string | null
           created_at?: string | null
           duplicate_rows?: number | null

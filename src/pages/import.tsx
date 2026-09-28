@@ -749,7 +749,9 @@ async function runImport(opts: {
     if (!name) throw new Error("Campaign name required for new campaign");
     const { data: campaign, error } = await supabase
       .from("campaigns")
-      .insert({ org_id: orgId, name, status: "draft", source: "import" })
+      // Without created_by the campaign belongs to nobody, and the
+      // per-member rules would hide it from the person who just made it.
+      .insert({ org_id: orgId, created_by: actorId, name, status: "draft", source: "import" })
       .select()
       .single();
     if (error) throw error;
@@ -911,6 +913,8 @@ async function runImport(opts: {
   await supabase.from("imports").insert({
     org_id: orgId,
     campaign_id: campaignId,
+    // Whose import this was: members only see their own history.
+    created_by: actorId,
     file_name: file.name,
     total_rows: summary.total,
     imported_rows: summary.imported,
