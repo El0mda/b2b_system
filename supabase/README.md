@@ -10,7 +10,12 @@ Open the Supabase dashboard → **SQL Editor** → New query → paste each file
 2. `migrations/0002_rls_policies.sql` — enables RLS and adds org-scoped policies
 3. …through `migrations/0028_member_data_isolation.sql` (0019 creates the public `email-media` storage bucket; 0020 gives sender accounts an owner)
 
-The files are idempotent (`CREATE TABLE IF NOT EXISTS` / `DROP POLICY IF EXISTS`), so re-running them is safe.
+Run each file **once**, in order. They are individually idempotent, but
+re-running an **earlier** file after later ones is not safe: 0002 creates
+blanket "anything in your org" policies that later migrations replace
+with per-member ones, and because policies are OR-ed, recreating them
+silently re-opens every member's data to the whole team. If that happens,
+run `0029_drop_stale_org_wide_policies.sql`.
 
 After any migration, regenerate the app's types so the client stays in step:
 

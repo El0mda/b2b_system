@@ -68,6 +68,14 @@ CREATE POLICY "users_update_self_or_org" ON public.users
 
 -- =========================================================
 -- Generic org-scoped policies for the remaining tables
+--
+-- WARNING: do not re-run this file on a database that already has the
+-- later migrations. Policies are OR-ed, so recreating these blanket
+-- "anything in your org" policies silently overrules the per-member
+-- rules added in 0010 (campaigns, leads), 0017 (settings), 0020
+-- (sender_accounts) and 0028 (webhook_logs, imports, invitations) —
+-- which is exactly how members regained access to each other's leads
+-- and replies. 0029 drops them again if that happens.
 -- =========================================================
 DO $$
 DECLARE
