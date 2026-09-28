@@ -2,7 +2,7 @@
 // written for each of them. A campaign picks a vertical first and a
 // sequence second, so the same workspace can run manufacturing copy and
 // logistics copy without either one drifting into the other.
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import {
@@ -40,6 +40,7 @@ import { SequenceStepList } from "@/components/sequence/step-editor";
 import { JobPositionsInput } from "@/components/sequence/job-positions-input";
 import { isStepComplete, stepType, totalDays, type SequenceStep } from "@/lib/sequence-presets";
 import {
+  seedBuiltinLibrary,
   templateOptions,
   useSequenceLibrary,
   verticalOptions,
@@ -84,6 +85,24 @@ export default function SequencesPage() {
     return m?.full_name ?? m?.email ?? null;
   };
   const options = useMemo(() => verticalOptions(verticals), [verticals]);
+  const seeded = useRef(false);
+
+  // First visit: copy the sequences that ship with the app into this
+  // org's library so every one of them is editable. Before this they were
+  // read-only code, and changing a word meant duplicating first.
+  useEffect(() => {
+    if (isLoading || seeded.current || !orgId || verticals.length > 0) return;
+    seeded.current = true;
+    seedBuiltinLibrary(orgId, profile?.id ?? null)
+      .then(() => {
+        qc.invalidateQueries({ queryKey: ["sequence-verticals", orgId] });
+        qc.invalidateQueries({ queryKey: ["sequence-templates", orgId] });
+      })
+      .catch((e) => {
+        seeded.current = false;
+        console.error("Couldn't set up the sequence library:", e);
+      });
+  }, [isLoading, orgId, verticals.length, profile?.id, qc]);
 
   const [selectedKey, setSelectedKey] = useState<string>("");
   const [verticalDialog, setVerticalDialog] = useState<OrgVertical | "new" | null>(null);
@@ -277,11 +296,7 @@ export default function SequencesPage() {
                     className={cn("h-4 w-4", active ? "text-primary" : "text-muted-foreground")}
                   />
                   <span className="truncate text-sm font-medium">{o.name}</span>
-                  {o.builtin && (
-                    <Badge variant="secondary" className="ml-auto">
-                      <Lock className="h-3 w-3" /> Built-in
-                    </Badge>
-                  )}
+
                 </div>
                 {o.description && (
                   <p className="mt-1 line-clamp-2 text-xs text-muted-foreground">{o.description}</p>
@@ -349,7 +364,7 @@ export default function SequencesPage() {
             )}
           </div>
 
-          {selected?.builtin && (
+          {false && (
             <p className="rounded-lg border border-dashed border-border p-3 text-sm text-muted-foreground">
               Built-in sequences ship with the app, so they can't be changed in place — use "Copy
               &amp; edit" to make your own version. Everything your team has saved can be edited by
@@ -376,11 +391,7 @@ export default function SequencesPage() {
                           </p>
                         )}
                       </div>
-                      {t.builtin && (
-                        <Badge variant="secondary">
-                          <Lock className="h-3 w-3" /> Built-in
-                        </Badge>
-                      )}
+
                     </div>
                     {t.jobPositions.length > 0 && (
                       <div className="flex flex-wrap items-center gap-1">
@@ -513,9 +524,9 @@ function CopyToVerticalButton({
       <Button
         variant="outline"
         size="sm"
-        onClick={() => toast.info("Create a vertical of your own first, then copy into it.")}
+        onClick={() => toast.info("Create a vertical first, then duplicate into it.")}
       >
-        <Copy className="h-3.5 w-3.5" /> Copy
+        <Copy className="h-3.5 w-3.5" /> Duplicate
       </Button>
     );
   }
@@ -523,13 +534,13 @@ function CopyToVerticalButton({
   return (
     <>
       <Button variant="outline" size="sm" onClick={() => setOpen(true)}>
-        <Copy className="h-3.5 w-3.5" /> Copy &amp; edit
+        <Copy className="h-3.5 w-3.5" /> Duplicate
       </Button>
       <Dialog open={open} onClose={() => setOpen(false)}>
         <DialogHeader>
           <DialogTitle>Copy into which vertical?</DialogTitle>
           <DialogDescription>
-            You'll get an editable copy — the original stays where it is.
+            Puts a copy in another vertical. The original stays where it is.
           </DialogDescription>
         </DialogHeader>
         <div className="space-y-2">

@@ -9,6 +9,7 @@ import { parseMedia } from "@/lib/email-media";
 import {
   ANY_VERTICAL,
   BUILTIN_VERTICALS,
+  SEQUENCE_PRESETS,
   presetsForVertical,
   type SequenceStep,
 } from "@/lib/sequence-presets";
@@ -71,21 +72,69 @@ export interface TemplateOption {
   builtin: boolean;
 }
 
+/**
+ * The verticals to choose from.
+ *
+ * Once the org has its own (seeded on first use by seedBuiltinLibrary),
+ * only those are listed: the built-ins have been copied into the library
+ * as ordinary, editable rows, and showing both would duplicate every
+ * sequence. The code built-ins remain as the pre-seed fallback.
+ */
 export function verticalOptions(orgVerticals: OrgVertical[]): VerticalOption[] {
-  return [
-    ...BUILTIN_VERTICALS.map((v) => ({
-      key: BUILTIN_PREFIX + v.key,
-      name: v.name,
-      description: v.description,
-      builtin: true,
-    })),
-    ...orgVerticals.map((v) => ({
+  if (orgVerticals.length > 0) {
+    return orgVerticals.map((v) => ({
       key: orgKey(v.id),
       name: v.name,
       description: v.description ?? "",
       builtin: false,
-    })),
-  ];
+    }));
+  }
+  return BUILTIN_VERTICALS.map((v) => ({
+    key: BUILTIN_PREFIX + v.key,
+    name: v.name,
+    description: v.description,
+    builtin: true,
+  }));
+}
+
+/**
+ * Copies the sequences that ship with the app into the org's own
+ * library, once, so every sequence is a normal row the team can edit.
+ * They used to be read-only code, which meant "duplicate it before you
+ * can change a word".
+ *
+ * Run when the org has no verticals at all. The blank "Custom" starting
+ * point is deliberately not copied — it isn't a sequence.
+ */
+export async function seedBuiltinLibrary(orgId: string, userId: string | null): Promise<void> {
+  const { data: verticals, error: vErr } = await supabase
+    .from("sequence_verticals")
+    .insert(
+      BUILTIN_VERTICALS.map((v) => ({
+        org_id: orgId,
+        created_by: userId,
+        name: v.name,
+        description: v.description,
+      })),
+    )
+    .select("id, name");
+  if (vErr) throw vErr;
+
+  const idByName = new Map((verticals ?? []).map((v) => [v.name, v.id]));
+  const rows = SEQUENCE_PRESETS.filter((p) => p.vertical !== ANY_VERTICAL).map((p) => {
+    const vertical = BUILTIN_VERTICALS.find((v) => v.key === p.vertical);
+    return {
+      org_id: orgId,
+      vertical_id: vertical ? (idByName.get(vertical.name) ?? null) : null,
+      created_by: userId,
+      name: p.name,
+      description: p.description,
+      job_positions: [] as string[],
+      steps: p.steps.map((step, i) => ({ ...step, step: i + 1 })),
+    };
+  });
+  const { error: tErr } = await supabase.from("sequence_templates").insert(rows);
+  if (tErr) throw tErr;
 }
 
 // Templates offered inside a vertical: the built-in presets tagged with

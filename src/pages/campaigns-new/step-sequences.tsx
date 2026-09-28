@@ -67,13 +67,13 @@ function trackFromTemplate(t: TemplateOption, verticalKey: string, name?: string
   };
 }
 
-function blankTrack(n: number): WizardTrack {
+function blankTrack(n: number, verticalKey: string): WizardTrack {
   return {
     key: newTrackKey(),
     name: `Sequence ${n}`,
     jobPositions: [],
     steps: [{ step: 1, type: "email", delay_days: 0, subject: "", body: "" }],
-    verticalKey: DEFAULT_VERTICAL,
+    verticalKey,
     presetKey: "",
     templateId: null,
   };
@@ -96,6 +96,11 @@ export function StepSequences({
   const { verticals, templates } = useSequenceLibrary(orgId);
   const [saveOpen, setSaveOpen] = useState(false);
 
+  // Once the org's library is seeded the built-in verticals are gone, so
+  // the wizard follows whatever the library actually has.
+  const verticalChoices = useMemo(() => verticalOptions(verticals), [verticals]);
+  const defaultVerticalKey = verticalChoices[0]?.key ?? DEFAULT_VERTICAL;
+
   const tracks = state.tracks;
   const active = tracks.find((t) => t.key === state.activeTrackKey) ?? tracks[0] ?? null;
 
@@ -103,8 +108,10 @@ export function StepSequences({
   // the single-sequence campaign works exactly as it always has.
   useEffect(() => {
     if (tracks.length > 0) return;
-    const first = templateOptions(DEFAULT_VERTICAL, templates)[0];
-    const track = first ? trackFromTemplate(first, DEFAULT_VERTICAL, "Main sequence") : blankTrack(1);
+    const first = templateOptions(defaultVerticalKey, templates)[0];
+    const track = first
+      ? trackFromTemplate(first, defaultVerticalKey, "Main sequence")
+      : blankTrack(1, defaultVerticalKey);
     setState((p) => ({
       ...p,
       tracks: [track],
@@ -112,7 +119,8 @@ export function StepSequences({
       defaultTrackKey: track.key,
     }));
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [verticalChoices.length, templates.length]);
 
   const updateTrack = (key: string, patch: Partial<WizardTrack>) =>
     setState((p) => ({
@@ -209,6 +217,7 @@ export function StepSequences({
         counts={assignment.counts}
         showCounts={tracks.length > 1}
         templates={templates}
+        defaultVerticalKey={defaultVerticalKey}
         onSelect={(key) => setState((p) => ({ ...p, activeTrackKey: key }))}
         onAdd={addTrack}
       />
@@ -217,6 +226,10 @@ export function StepSequences({
         <TrackEditor
           key={active.key}
           track={active}
+          leads={selectedLeads.filter(
+            (l) => assignment.byLead.get(leadKey(l)) === active.key,
+          )}
+          totalLeads={selectedLeads.length}
           canRemove={tracks.length > 1}
           multi={tracks.length > 1}
           templates={templates}
@@ -289,6 +302,7 @@ function TrackBar({
   counts,
   showCounts,
   templates,
+  defaultVerticalKey,
   onSelect,
   onAdd,
 }: {
@@ -297,6 +311,7 @@ function TrackBar({
   counts: Map<string, number>;
   showCounts: boolean;
   templates: Parameters<typeof templateOptions>[1];
+  defaultVerticalKey: string;
   onSelect: (key: string) => void;
   onAdd: (track: WizardTrack) => void;
 }) {
@@ -355,7 +370,7 @@ function TrackBar({
               const v = e.target.value;
               if (!v) return;
               if (v === "__blank__") {
-                onAdd(blankTrack(tracks.length + 1));
+                onAdd(blankTrack(tracks.length + 1, defaultVerticalKey));
                 return;
               }
               const t = saved.find((x) => x.id === v);
@@ -365,7 +380,7 @@ function TrackBar({
                 name: t.name,
                 jobPositions: [...(t.job_positions ?? [])],
                 steps: clone(t.steps),
-                verticalKey: t.vertical_id ? orgKey(t.vertical_id) : DEFAULT_VERTICAL,
+                verticalKey: t.vertical_id ? orgKey(t.vertical_id) : defaultVerticalKey,
                 presetKey: orgKey(t.id),
                 templateId: t.id,
               });
@@ -398,6 +413,8 @@ function TrackBar({
 
 function TrackEditor({
   track,
+  leads,
+  totalLeads,
   canRemove,
   multi,
   templates,
@@ -407,6 +424,8 @@ function TrackEditor({
   onSaveTemplate,
 }: {
   track: WizardTrack;
+  leads: Array<{ email: string; full_name?: string; first_name?: string; last_name?: string; job_title?: string }>;
+  totalLeads: number;
   canRemove: boolean;
   multi: boolean;
   templates: Parameters<typeof templateOptions>[1];
@@ -536,12 +555,100 @@ function TrackEditor({
         </CardContent>
       </Card>
 
+      <TrackLeads track={track} leads={leads} totalLeads={totalLeads} multi={multi} />
+
       <SequenceStepList
         steps={track.steps}
         idPrefix={`track-${track.key.slice(0, 8)}`}
         onChange={(steps) => onChange({ steps })}
       />
     </>
+  );
+}
+
+/**
+ * Exactly who this sequence goes to, on the sequence itself — the count
+ * and the actual addresses. Without it the split between sequences is
+ * only a number, and a mistake in the job positions isn't visible until
+ * after the campaign has gone out.
+ */
+function TrackLeads({
+  track,
+  leads,
+  totalLeads,
+  multi,
+}: {
+  track: WizardTrack;
+  leads: Array<{ email: string; full_name?: string; first_name?: string; last_name?: string; job_title?: string }>;
+  totalLeads: number;
+  multi: boolean;
+}) {
+  const [showAll, setShowAll] = useState(false);
+  const shown = showAll ? leads : leads.slice(0, 8);
+
+  return (
+    <Card>
+      <CardHeader>
+        <div className="flex flex-wrap items-center gap-2">
+          <Users className="h-5 w-5 text-primary" />
+          <CardTitle>
+            {leads.length} {leads.length === 1 ? "lead gets" : "leads get"} "{track.name || "this sequence"}"
+          </CardTitle>
+          {multi && (
+            <Badge variant="secondary">
+              of {totalLeads} selected
+            </Badge>
+          )}
+        </div>
+        <CardDescription>
+          {track.jobPositions.length > 0
+            ? `Matched on: ${track.jobPositions.join(", ")}`
+            : multi
+              ? "No job positions set — only leads sent here by the default, or moved by hand."
+              : "With a single sequence, every selected lead gets it."}
+        </CardDescription>
+      </CardHeader>
+      <CardContent>
+        {leads.length === 0 ? (
+          <p className="text-sm text-amber-700 dark:text-amber-400">
+            No leads match this sequence yet. Add job positions that match your leads' job titles,
+            or move leads to it below.
+          </p>
+        ) : (
+          <div className="space-y-2">
+            <div className="max-h-64 overflow-auto rounded-md border border-border">
+              <table className="w-full text-sm">
+                <tbody>
+                  {shown.map((l) => (
+                    <tr key={l.email} className="border-b border-border last:border-b-0">
+                      <td className="px-3 py-1.5">
+                        <p className="truncate font-medium">
+                          {l.full_name || `${l.first_name ?? ""} ${l.last_name ?? ""}`.trim() || l.email}
+                        </p>
+                        <p className="truncate text-xs text-muted-foreground">{l.email}</p>
+                      </td>
+                      <td className="px-3 py-1.5 text-right text-xs text-muted-foreground">
+                        {l.job_title || "—"}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            {leads.length > shown.length && (
+              <Button variant="ghost" size="sm" onClick={() => setShowAll(true)}>
+                Show all {leads.length}
+              </Button>
+            )}
+            {showAll && leads.length > 8 && (
+              <Button variant="ghost" size="sm" onClick={() => setShowAll(false)}>
+                Show fewer
+              </Button>
+            )}
+          </div>
+        )}
+      </CardContent>
+    </Card>
   );
 }
 
