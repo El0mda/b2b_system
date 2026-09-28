@@ -143,7 +143,9 @@ export default function TeamPage() {
 
   const updateRole = useMutation({
     mutationFn: async ({ id, role }: { id: string; email: string; role: string }) => {
-      const { error } = await supabase.from("users").update({ role }).eq("id", id);
+      // Through a function, not a direct update: writing to another
+      // member's row is refused by row-level security (see 0027).
+      const { error } = await supabase.rpc("set_member_role", { p_user_id: id, p_role: role });
       if (error) throw error;
     },
     onSuccess: async (_data, { email, role }) => {
@@ -165,10 +167,10 @@ export default function TeamPage() {
 
   const updateOdooUserId = useMutation({
     mutationFn: async ({ id, odooUserId }: { id: string; odooUserId: string }) => {
-      const { error } = await supabase
-        .from("users")
-        .update({ odoo_user_id: odooUserId.trim() || null })
-        .eq("id", id);
+      const { error } = await supabase.rpc("set_member_odoo_user_id", {
+        p_user_id: id,
+        p_odoo_user_id: odooUserId,
+      });
       if (error) throw error;
     },
     onSuccess: () => {
@@ -180,7 +182,7 @@ export default function TeamPage() {
 
   const removeMember = useMutation({
     mutationFn: async ({ id }: { id: string; email: string }) => {
-      const { error } = await supabase.from("users").update({ org_id: null }).eq("id", id);
+      const { error } = await supabase.rpc("remove_org_member", { p_user_id: id });
       if (error) throw error;
     },
     onSuccess: async (_data, { email }) => {

@@ -1012,6 +1012,12 @@ export type Database = {
         Returns: undefined
       }
       is_org_admin: { Args: never; Returns: boolean }
+      remove_org_member: { Args: { p_user_id: string }; Returns: undefined }
+      set_member_odoo_user_id: {
+        Args: { p_odoo_user_id: string; p_user_id: string }
+        Returns: undefined
+      }
+      set_member_role: { Args: { p_role: string; p_user_id: string }; Returns: undefined }
       is_org_owner: { Args: never; Returns: boolean }
       pending_invitation_for_current_user: {
         Args: never
