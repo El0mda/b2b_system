@@ -80,15 +80,23 @@ interface Message {
  * because the two versions of SmartLead's docs disagree on them.
  */
 export function normalizeHistory(history: any[]): Message[] {
+  const stamp = (t: string | null): number => {
+    if (!t) return Number.POSITIVE_INFINITY;
+    const ms = new Date(t).getTime();
+    // A message SmartLead hasn't dated yet is the one just sent, so it
+    // belongs at the end of the conversation — not at the start, which is
+    // where treating "no date" as zero would put it.
+    return Number.isNaN(ms) ? Number.POSITIVE_INFINITY : ms;
+  };
   return history
     .map((h) => ({
       type: (h?.type === "REPLY" ? "reply" : "sent") as Message["type"],
-      time: h?.time ?? h?.sent_time ?? null,
+      time: h?.time ?? h?.sent_time ?? h?.created_at ?? h?.sent_at ?? h?.message_time ?? null,
       subject: h?.subject ?? null,
       text: htmlToText(String(h?.email_body ?? h?.body ?? "")),
       raw: h,
     }))
-    .sort((a, b) => new Date(a.time ?? 0).getTime() - new Date(b.time ?? 0).getTime());
+    .sort((a, b) => stamp(a.time) - stamp(b.time));
 }
 
 /**
