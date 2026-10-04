@@ -27,6 +27,7 @@ import {
   Loader2,
   Rocket,
   UserPlus,
+  Layers,
 } from "lucide-react";
 
 import { supabase } from "@/lib/supabase";
@@ -50,6 +51,7 @@ interface LeadRow {
   email: string | null;
   company: string | null;
   job_title: string | null;
+  department: string | null;
   source: string | null;
   phone: string | null;
   location: string | null;
@@ -673,6 +675,9 @@ function LeadSlideOver({
             <h4 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Contact Info</h4>
             <div className="grid grid-cols-2 gap-3 text-sm">
               <LeadInfo icon={Briefcase} label="Title" value={lead.job_title} />
+              {/* What the lead's sequence routing is based on, when the
+                  provider gave us one. */}
+              <LeadInfo icon={Layers} label="Department" value={lead.department} />
               <LeadInfo icon={Building2} label="Company" value={lead.company} />
               <LeadInfo icon={MapPin} label="Location" value={lead.location} />
               <LeadInfo icon={Phone} label="Phone" value={lead.phone} />

@@ -243,6 +243,7 @@ function ImportTab({
         full_name: full || `${first} ${last}`.trim() || undefined,
         company: get("company") || undefined,
         job_title: get("job_title") || undefined,
+        department: get("department") || undefined,
         phone: get("phone") || undefined,
         location: get("location") || undefined,
         linkedin_url: get("linkedin_url") || undefined,

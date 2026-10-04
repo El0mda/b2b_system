@@ -771,6 +771,7 @@ async function runImport(opts: {
     full_name?: string;
     company?: string;
     job_title?: string;
+    department?: string;
     phone?: string;
     location?: string;
     linkedin_url?: string;
@@ -804,6 +805,7 @@ async function runImport(opts: {
       full_name: full || `${first} ${last}`.trim() || undefined,
       company: get("company") || undefined,
       job_title: get("job_title") || undefined,
+      department: get("department") || undefined,
       phone: get("phone") || undefined,
       location: get("location") || undefined,
       linkedin_url: get("linkedin_url") || undefined,
@@ -874,6 +876,7 @@ async function runImport(opts: {
       full_name: c.full_name ?? null,
       company: c.company ?? null,
       job_title: c.job_title ?? null,
+      department: c.department ?? null,
       phone: c.phone ?? null,
       location: c.location ?? null,
       linkedin_url: c.linkedin_url ?? null,

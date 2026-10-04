@@ -23,6 +23,8 @@ export interface LeadDraft {
   full_name?: string;
   company?: string;
   job_title?: string;
+  /** As the data provider wrote it; sequences route on it (job-match.ts). */
+  department?: string;
   phone?: string;
   location?: string;
   linkedin_url?: string;
@@ -103,6 +105,7 @@ export async function saveFoundLeads({
     full_name: l.full_name ?? null,
     company: l.company ?? null,
     job_title: l.job_title ?? null,
+    department: l.department ?? null,
     phone: l.phone ?? null,
     location: l.location ?? null,
     linkedin_url: l.linkedin_url ?? null,

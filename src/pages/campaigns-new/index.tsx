@@ -60,7 +60,7 @@ export default function NewCampaignPage() {
       const { data, error } = await supabase
         .from("leads")
         .select(
-          "id, contact_id, email, first_name, last_name, full_name, company, job_title, phone, location, linkedin_url, website, nb_result, email_valid, source",
+          "id, contact_id, email, first_name, last_name, full_name, company, job_title, department, phone, location, linkedin_url, website, nb_result, email_valid, source",
         )
         .in("id", preselectedIds);
       if (cancelled) return;
@@ -80,6 +80,7 @@ export default function NewCampaignPage() {
         full_name: l.full_name ?? undefined,
         company: l.company ?? undefined,
         job_title: l.job_title ?? undefined,
+        department: l.department ?? undefined,
         phone: l.phone ?? undefined,
         location: l.location ?? undefined,
         linkedin_url: l.linkedin_url ?? undefined,

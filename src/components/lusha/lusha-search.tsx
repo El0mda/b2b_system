@@ -56,6 +56,15 @@ import {
   DEFAULT_JOB_TITLES,
 } from "@/lib/lusha-defaults";
 
+/** The contact's department, whichever field Lusha put it in. */
+function lushaDepartment(d: any): string | undefined {
+  const raw = d?.departments ?? d?.department ?? d?.jobDepartment ?? d?.companyDepartment;
+  const first = Array.isArray(raw) ? raw[0] : raw;
+  if (!first) return undefined;
+  const name = typeof first === "string" ? first : (first.name ?? first.value ?? "");
+  return String(name).trim() || undefined;
+}
+
 export function LushaSearch({
   filters,
   setFilters,
@@ -411,6 +420,10 @@ export function LushaSearch({
           full_name: fullName,
           company: p?.company ?? d.companyName ?? d.company?.name ?? "",
           job_title: p?.jobTitle ?? d.jobTitle ?? "",
+          // Lusha's wording varies by endpoint version, so each spelling
+          // it has used is read in turn; a department list collapses to
+          // its first entry, which is the contact's primary one.
+          department: lushaDepartment(d),
           phone: phone || undefined,
           location: p?.location ?? (d.location ? `${d.location.city ?? ""} ${d.location.state ?? ""} ${d.location.country ?? ""}`.trim() : ""),
           linkedin_url: p?.linkedinUrl ?? d.socialLinks?.linkedin ?? "",

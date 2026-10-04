@@ -39,6 +39,8 @@ import {
 } from "@/components/ui/dialog";
 import { SequenceStepList } from "@/components/sequence/step-editor";
 import { JobPositionsInput } from "@/components/sequence/job-positions-input";
+import { DepartmentsInput } from "@/components/sequence/departments-input";
+import { InfoTooltip } from "@/components/ui/tooltip";
 import { BUILTIN_VERTICALS, isStepComplete, stepType } from "@/lib/sequence-presets";
 import {
   BUILTIN_PREFIX,
@@ -49,17 +51,25 @@ import {
   verticalOptions,
   type TemplateOption,
 } from "@/lib/sequence-library";
-import { assignLeads, leadKey, newTrackKey, type WizardTrack } from "@/lib/tracks";
+import {
+  assignLeads,
+  describeAudience,
+  leadKey,
+  newTrackKey,
+  type WizardTrack,
+} from "@/lib/tracks";
 import { cn } from "@/lib/utils";
 import type { WizardState } from "./types";
 
 const DEFAULT_VERTICAL = BUILTIN_PREFIX + BUILTIN_VERTICALS[0].key;
+
 
 function trackFromTemplate(t: TemplateOption, verticalKey: string, name?: string): WizardTrack {
   return {
     key: newTrackKey(),
     name: name ?? t.name,
     jobPositions: [...t.jobPositions],
+    departments: [...t.departments],
     steps: clone(t.steps),
     verticalKey,
     presetKey: t.key,
@@ -72,6 +82,7 @@ function blankTrack(n: number, verticalKey: string): WizardTrack {
     key: newTrackKey(),
     name: `Sequence ${n}`,
     jobPositions: [],
+    departments: [],
     steps: [{ step: 1, type: "email", delay_days: 0, subject: "", body: "" }],
     verticalKey,
     presetKey: "",
@@ -198,6 +209,7 @@ export function StepSequences({
       name: name.trim(),
       description: description.trim() || null,
       job_positions: active.jobPositions,
+      departments: active.departments,
       steps: active.steps.map((s, i) => ({ ...s, step: i + 1 })),
     });
     if (error) {
@@ -379,6 +391,7 @@ function TrackBar({
                 key: newTrackKey(),
                 name: t.name,
                 jobPositions: [...(t.job_positions ?? [])],
+                departments: [...(t.departments ?? [])],
                 steps: clone(t.steps),
                 verticalKey: t.vertical_id ? orgKey(t.vertical_id) : defaultVerticalKey,
                 presetKey: orgKey(t.id),
@@ -501,21 +514,38 @@ function TrackEditor({
               />
             </div>
             <div className="space-y-1.5">
+              <div className="flex items-center gap-1.5">
+                <Label htmlFor="track-departments">
+                  Departments{" "}
+                  {!multi && <span className="font-normal text-muted-foreground">(optional)</span>}
+                </Label>
+                <InfoTooltip text="Everyone in this function, however their title is written — an HR sequence picks up HR, Head of People and Talent Acquisition Manager alike. Use job positions below when you want a specific level." />
+              </div>
+              <DepartmentsInput
+                value={track.departments}
+                onChange={(departments) => onChange({ departments })}
+              />
+            </div>
+          </div>
+
+          <div className="space-y-1.5">
+            <div className="flex items-center gap-1.5">
               <Label htmlFor="track-positions">
                 Job positions{" "}
                 {!multi && <span className="font-normal text-muted-foreground">(optional)</span>}
               </Label>
-              <JobPositionsInput
-                id="track-positions"
-                value={track.jobPositions}
-                onChange={(jobPositions) => onChange({ jobPositions })}
-              />
-              {!multi && (
-                <p className="text-xs text-muted-foreground">
-                  With one sequence, every lead gets it. Positions matter once you add another.
-                </p>
-              )}
+              <InfoTooltip text="Matched on meaning, not spelling: HR Manager also catches Human Resources Manager, Sr. HR Mgr and HR Business Partner — but not HR Intern, which is a different level." />
             </div>
+            <JobPositionsInput
+              id="track-positions"
+              value={track.jobPositions}
+              onChange={(jobPositions) => onChange({ jobPositions })}
+            />
+            <p className="text-xs text-muted-foreground">
+              {!multi
+                ? "With one sequence, every lead gets it. This matters once you add another."
+                : "A lead matching a job position wins over one matched only by department."}
+            </p>
           </div>
 
           <div className="grid gap-4 border-t border-border pt-4 sm:grid-cols-2">
@@ -601,18 +631,18 @@ function TrackLeads({
           )}
         </div>
         <CardDescription>
-          {track.jobPositions.length > 0
-            ? `Matched on: ${track.jobPositions.join(", ")}`
+          {describeAudience(track)
+            ? `Matched on: ${describeAudience(track)}`
             : multi
-              ? "No job positions set — only leads sent here by the default, or moved by hand."
+              ? "No positions or departments set — only leads sent here by the default, or moved by hand."
               : "With a single sequence, every selected lead gets it."}
         </CardDescription>
       </CardHeader>
       <CardContent>
         {leads.length === 0 ? (
           <p className="text-sm text-amber-700 dark:text-amber-400">
-            No leads match this sequence yet. Add job positions that match your leads' job titles,
-            or move leads to it below.
+            No leads match this sequence yet. Pick the department these leads work in, add job
+            positions that match their titles, or move leads here by hand below.
           </p>
         ) : (
           <div className="space-y-2">

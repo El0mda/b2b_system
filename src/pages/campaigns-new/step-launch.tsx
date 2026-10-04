@@ -38,7 +38,7 @@ import {
   type SequenceStep,
 } from "@/lib/sequence-presets";
 import { describeDays } from "@/lib/campaign-settings";
-import { assignLeads, leadKey } from "@/lib/tracks";
+import { assignLeads, describeAudience, leadKey } from "@/lib/tracks";
 import { cn, getFunctionErrorMessage } from "@/lib/utils";
 import type { Database } from "@/types/db";
 import type { WizardState } from "./types";
@@ -246,6 +246,7 @@ export function StepLaunch({
           name: t.name.trim() || `Sequence ${i + 1}`,
           position: i,
           job_positions: t.jobPositions,
+          departments: t.departments,
           is_default: t.key === state.defaultTrackKey,
           template_id: t.templateId,
           lead_count: count,
@@ -285,6 +286,7 @@ export function StepLaunch({
         full_name: l.full_name ?? null,
         company: l.company ?? null,
         job_title: l.job_title ?? null,
+        department: l.department ?? null,
         phone: l.phone ?? null,
         location: l.location ?? null,
         linkedin_url: l.linkedin_url ?? null,
@@ -628,9 +630,9 @@ export function StepLaunch({
                     <Badge variant="secondary">
                       {routing.counts.get(track.key) ?? 0} leads
                     </Badge>
-                    {track.jobPositions.length > 0 && (
+                    {describeAudience(track).length > 0 && (
                       <span className="text-xs text-muted-foreground">
-                        for {track.jobPositions.join(", ")}
+                        for {describeAudience(track)}
                       </span>
                     )}
                   </div>

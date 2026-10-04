@@ -47,6 +47,7 @@ import {
 } from "recharts";
 
 import { supabase } from "@/lib/supabase";
+import { departmentName } from "@/lib/job-match";
 import { useAuth } from "@/hooks/use-auth";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -140,6 +141,7 @@ interface CampaignTrack {
   name: string;
   position: number;
   job_positions: string[];
+  departments: string[];
   status: string;
   error: string | null;
   lead_count: number;
@@ -179,6 +181,14 @@ const LEAD_STATUS = (l: Lead): { label: string; className: string } => {
 };
 
 const FILTER_OPTIONS = ["all", "delivered", "opened", "replied", "bounced"] as const;
+
+/** Who a track is for: its job positions and its departments. */
+function trackAudience(t: { job_positions: string[]; departments: string[] | null }): string {
+  return [
+    ...(t.job_positions ?? []),
+    ...(t.departments ?? []).map((d) => `${departmentName(d)} dept`),
+  ].join(", ");
+}
 
 export default function CampaignDetailPage() {
   const { id } = useParams<{ id: string }>();
@@ -225,7 +235,7 @@ export default function CampaignDetailPage() {
       const { data } = await supabase
         .from("campaign_tracks")
         .select(
-          "id, name, position, job_positions, status, error, lead_count, is_default, smartlead_campaign_id",
+          "id, name, position, job_positions, departments, status, error, lead_count, is_default, smartlead_campaign_id",
         )
         .eq("campaign_id", id!)
         .order("position", { ascending: true });
@@ -886,8 +896,8 @@ function TabSequences({
             <Badge variant="secondary">{t.lead_count} leads</Badge>
             {t.is_default && <Badge variant="outline">Default</Badge>}
           </div>
-          {t.job_positions.length > 0 && (
-            <p className="text-xs text-muted-foreground">For: {t.job_positions.join(", ")}</p>
+          {trackAudience(t) && (
+            <p className="text-xs text-muted-foreground">For: {trackAudience(t)}</p>
           )}
           <StepCards sequences={sequences.filter((s) => s.track_id === t.id)} />
         </div>
@@ -977,9 +987,9 @@ function TrackBreakdown({
                   <tr key={t.id} className="border-b border-border last:border-b-0 align-top">
                     <td className="py-2 pr-3">
                       <p className="font-medium">{t.name}</p>
-                      {t.job_positions.length > 0 && (
+                      {trackAudience(t) && (
                         <p className="max-w-xs truncate text-xs text-muted-foreground">
-                          {t.job_positions.join(", ")}
+                          {trackAudience(t)}
                         </p>
                       )}
                       {t.status === "failed" && t.error && (

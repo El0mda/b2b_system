@@ -30,6 +30,8 @@ export interface OrgTemplate {
   steps: SequenceStep[];
   // Who the sequence is for — used to route campaign leads to it.
   job_positions: string[];
+  // Whole departments it's for, as keys from lib/job-match.ts.
+  departments: string[];
   created_by: string | null;
   created_at: string | null;
   updated_at: string | null;
@@ -67,6 +69,7 @@ export interface TemplateOption {
   description: string;
   steps: SequenceStep[];
   jobPositions: string[];
+  departments: string[];
   /** Set for saved templates, so a campaign track can record its source. */
   templateId: string | null;
   builtin: boolean;
@@ -130,6 +133,7 @@ export async function seedBuiltinLibrary(orgId: string, userId: string | null): 
       name: p.name,
       description: p.description,
       job_positions: [] as string[],
+      departments: [] as string[],
       steps: p.steps.map((step, i) => ({ ...step, step: i + 1 })),
     };
   });
@@ -159,6 +163,7 @@ export function templateOptions(
     steps: p.steps,
     // Built-ins are industry copy, not written for a particular role.
     jobPositions: [] as string[],
+    departments: [] as string[],
     templateId: null,
     builtin: true,
   }));
@@ -172,6 +177,7 @@ export function templateOptions(
       description: t.description ?? `${t.steps.length} steps`,
       steps: t.steps,
       jobPositions: t.job_positions ?? [],
+      departments: t.departments ?? [],
       templateId: t.id,
       builtin: false,
     }));
@@ -228,7 +234,7 @@ export function useSequenceLibrary(orgId: string | undefined) {
       const { data, error } = await supabase
         .from("sequence_templates")
         .select(
-          "id, vertical_id, name, description, steps, job_positions, created_by, created_at, updated_at",
+          "id, vertical_id, name, description, steps, job_positions, departments, created_by, created_at, updated_at",
         )
         .eq("org_id", orgId!)
         .order("name");
@@ -237,6 +243,7 @@ export function useSequenceLibrary(orgId: string | undefined) {
         ...t,
         steps: parseSteps(t.steps),
         job_positions: t.job_positions ?? [],
+        departments: t.departments ?? [],
       })) as OrgTemplate[];
     },
   });

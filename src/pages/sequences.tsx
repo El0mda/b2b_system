@@ -38,6 +38,8 @@ import {
 import { FullPageSpinner } from "@/components/ui/spinner";
 import { SequenceStepList } from "@/components/sequence/step-editor";
 import { JobPositionsInput } from "@/components/sequence/job-positions-input";
+import { DepartmentsInput } from "@/components/sequence/departments-input";
+import { departmentName } from "@/lib/job-match";
 import { isStepComplete, stepType, totalDays, type SequenceStep } from "@/lib/sequence-presets";
 import {
   seedBuiltinLibrary,
@@ -57,6 +59,7 @@ interface TemplateDraft {
   name: string;
   description: string;
   jobPositions: string[];
+  departments: string[];
   steps: SequenceStep[];
 }
 
@@ -198,6 +201,7 @@ export default function SequencesPage() {
         // from a built-in preset carries the preset's numbering.
         steps: d.steps.map((s, i) => ({ ...s, step: i + 1 })),
         job_positions: d.jobPositions,
+        departments: d.departments,
         updated_at: new Date().toISOString(),
       };
       if (d.id) {
@@ -358,6 +362,7 @@ export default function SequencesPage() {
                     name: "",
                     description: "",
                     jobPositions: [],
+                    departments: [],
                     steps: [{ step: 1, delay_days: 0, subject: "", body: "" }],
                   })
                 }
@@ -396,6 +401,16 @@ export default function SequencesPage() {
                       </div>
 
                     </div>
+                    {t.departments.length > 0 && (
+                      <div className="flex flex-wrap items-center gap-1">
+                        <Layers className="h-3.5 w-3.5 text-muted-foreground" />
+                        {t.departments.map((d) => (
+                          <Badge key={d} variant="secondary">
+                            {departmentName(d)}
+                          </Badge>
+                        ))}
+                      </div>
+                    )}
                     {t.jobPositions.length > 0 && (
                       <div className="flex flex-wrap items-center gap-1">
                         <Briefcase className="h-3.5 w-3.5 text-muted-foreground" />
@@ -442,6 +457,7 @@ export default function SequencesPage() {
                               name: saved.name,
                               description: saved.description ?? "",
                               jobPositions: saved.job_positions ?? [],
+                              departments: saved.departments ?? [],
                               steps: saved.steps.length
                                 ? saved.steps
                                 : [{ step: 1, delay_days: 0, subject: "", body: "" }],
@@ -460,6 +476,7 @@ export default function SequencesPage() {
                             name: `${t.name} (copy)`,
                             description: t.description,
                             jobPositions: t.jobPositions,
+                            departments: t.departments,
                             steps: t.steps.map((s, i) => ({ ...s, step: i + 1 })),
                           })
                         }
@@ -687,6 +704,17 @@ function TemplateEditor({
             />
           </div>
           <div className="space-y-1.5 sm:col-span-2">
+            <Label>Departments this sequence is for</Label>
+            <DepartmentsInput
+              value={draft.departments}
+              onChange={(departments) => onChange({ ...draft, departments })}
+            />
+            <p className="text-xs text-muted-foreground">
+              Everyone in the function, whatever their title says — Human Resources catches "HR",
+              "Head of People" and "Talent Acquisition Manager" alike.
+            </p>
+          </div>
+          <div className="space-y-1.5 sm:col-span-2">
             <Label htmlFor="template-positions">Job positions this sequence is for</Label>
             <JobPositionsInput
               id="template-positions"
@@ -694,8 +722,10 @@ function TemplateEditor({
               onChange={(jobPositions) => onChange({ ...draft, jobPositions })}
             />
             <p className="text-xs text-muted-foreground">
-              When a campaign uses several sequences, each lead gets the one whose job positions
-              match its title — "HR Manager" also matches "Senior HR Manager".
+              For a specific level rather than a whole department. Matched on meaning, not
+              spelling: "HR Manager" also matches "Senior HR Manager", "Sr. HR Mgr" and "Human
+              Resources Business Partner" — but not "HR Intern". A position match beats a
+              department match.
             </p>
           </div>
         </CardContent>

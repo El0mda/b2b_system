@@ -1,17 +1,25 @@
 // Campaign tracks: several sequences in one campaign, each written for a
 // different audience, with every lead routed to the one that fits.
 //
-// A track is a sequence plus the job positions it's meant for. When a
-// campaign has several, each lead's job title is matched against them;
-// SmartLead only allows one sequence per campaign, so at launch every
-// track becomes its own SmartLead campaign (migration 0022).
+// A track is a sequence plus the audience it's meant for: job positions
+// ("HR Manager"), whole departments ("Human Resources"), or both. When a
+// campaign has several, each lead is matched against them; SmartLead only
+// allows one sequence per campaign, so at launch every track becomes its
+// own SmartLead campaign (migration 0022).
+//
+// How a title is matched lives in lib/job-match.ts.
 import type { SequenceStep } from "@/lib/sequence-presets";
+import { departmentName, leadMatchesDepartments, titleMatchesPosition } from "@/lib/job-match";
+
+export { titleMatchesPosition } from "@/lib/job-match";
 
 export interface WizardTrack {
   /** Local id, only meaningful inside the wizard. */
   key: string;
   name: string;
   jobPositions: string[];
+  /** Department keys from lib/job-match.ts — a whole function at once. */
+  departments: string[];
   steps: SequenceStep[];
   /** Library selection this track was loaded from — picker state only. */
   verticalKey: string;
@@ -20,55 +28,44 @@ export interface WizardTrack {
   templateId: string | null;
 }
 
+/** Who a sequence is for, in words: its positions and its departments. */
+export function describeAudience(
+  track: Pick<WizardTrack, "jobPositions" | "departments">,
+): string {
+  return [
+    ...track.jobPositions,
+    ...(track.departments ?? []).map((d) => `${departmentName(d)} dept`),
+  ].join(", ");
+}
+
 export function newTrackKey(): string {
   return crypto.randomUUID();
 }
 
-/**
- * Lowercases, turns punctuation into spaces and splits into words, so
- * "Sr. HR-Manager" and "sr hr manager" compare equal.
- */
-export function words(text: string): string[] {
-  return text
-    .toLowerCase()
-    .replace(/[^\p{L}\p{N}]+/gu, " ")
-    .trim()
-    .split(/\s+/)
-    .filter(Boolean);
-}
+export type MatchableTrack = Pick<WizardTrack, "key" | "jobPositions" | "departments">;
+export type MatchableLead = { job_title?: string | null; department?: string | null };
 
 /**
- * Does this job title fall under this position?
+ * The track this lead belongs in, or null when none fits.
  *
- * Matches whole words in order, not raw substrings: "HR Manager" matches
- * "Senior HR Manager" and "HR" matches "Head of HR", but "HR" must not
- * match "Synchronization Engineer" just because the letters appear.
+ * Job positions are tried across every track before departments, because
+ * a named position is the more specific statement of intent: given one
+ * sequence for the whole of Human Resources and another for HR Managers,
+ * an HR Manager should get the manager one no matter which was added
+ * first. Within each pass the earlier track wins.
  */
-export function titleMatchesPosition(title: string, position: string): boolean {
-  const t = words(title);
-  const p = words(position);
-  if (p.length === 0 || t.length < p.length) return false;
-  for (let i = 0; i <= t.length - p.length; i++) {
-    let hit = true;
-    for (let j = 0; j < p.length; j++) {
-      if (t[i + j] !== p[j]) {
-        hit = false;
-        break;
-      }
-    }
-    if (hit) return true;
-  }
-  return false;
-}
-
-/** The first track (in list order) whose positions match the title. */
 export function matchTrack(
-  title: string | null | undefined,
-  tracks: Pick<WizardTrack, "key" | "jobPositions">[],
+  lead: MatchableLead,
+  tracks: MatchableTrack[],
 ): string | null {
-  if (!title) return null;
+  const title = lead.job_title;
+  if (title) {
+    for (const track of tracks) {
+      if (track.jobPositions.some((p) => titleMatchesPosition(title, p))) return track.key;
+    }
+  }
   for (const track of tracks) {
-    if (track.jobPositions.some((p) => titleMatchesPosition(title, p))) return track.key;
+    if (leadMatchesDepartments(lead, track.departments ?? [])) return track.key;
   }
   return null;
 }
@@ -92,8 +89,8 @@ export interface Assignment {
 /**
  * Routes every lead to a track.
  *
- * Order of precedence: a manual override, then the first matching
- * track, then the default track — or nothing, when the default is
+ * Order of precedence: a manual override, then the matching track (see
+ * matchTrack), then the default track — or nothing, when the default is
  * "leave them out" (defaultKey null).
  *
  * With a single track everything goes to it: one sequence needs no
@@ -101,8 +98,8 @@ export interface Assignment {
  * single-sequence campaign.
  */
 export function assignLeads(
-  leads: Array<{ email: string; job_title?: string | null }>,
-  tracks: Pick<WizardTrack, "key" | "jobPositions">[],
+  leads: Array<{ email: string; job_title?: string | null; department?: string | null }>,
+  tracks: MatchableTrack[],
   defaultKey: string | null,
   overrides: Record<string, string>,
 ): Assignment {
@@ -121,7 +118,7 @@ export function assignLeads(
     } else if (overrides[key] && trackKeys.has(overrides[key])) {
       chosen = overrides[key];
     } else {
-      chosen = matchTrack(lead.job_title, tracks);
+      chosen = matchTrack(lead, tracks);
       if (!chosen) {
         unmatched++;
         chosen = defaultKey && trackKeys.has(defaultKey) ? defaultKey : null;

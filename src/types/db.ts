@@ -177,6 +177,7 @@ export type Database = {
       }
       campaign_tracks: {
         Row: {
+          departments: string[]
           campaign_id: string
           created_at: string | null
           error: string | null
@@ -192,6 +193,7 @@ export type Database = {
           template_id: string | null
         }
         Insert: {
+          departments?: string[]
           campaign_id: string
           created_at?: string | null
           error?: string | null
@@ -207,6 +209,7 @@ export type Database = {
           template_id?: string | null
         }
         Update: {
+          departments?: string[]
           campaign_id?: string
           created_at?: string | null
           error?: string | null
@@ -444,6 +447,7 @@ export type Database = {
       }
       leads: {
         Row: {
+          department: string | null
           created_by: string | null
           odoo_thread_synced_at: string | null
           last_reply_at: string | null
@@ -492,6 +496,7 @@ export type Database = {
           website: string | null
         }
         Insert: {
+          department?: string | null
           created_by?: string | null
           odoo_thread_synced_at?: string | null
           last_reply_at?: string | null
@@ -540,6 +545,7 @@ export type Database = {
           website?: string | null
         }
         Update: {
+          department?: string | null
           created_by?: string | null
           odoo_thread_synced_at?: string | null
           last_reply_at?: string | null
@@ -680,6 +686,7 @@ export type Database = {
       }
       sequence_templates: {
         Row: {
+          departments: string[]
           job_positions: string[]
           created_at: string | null
           created_by: string | null
@@ -692,6 +699,7 @@ export type Database = {
           vertical_id: string | null
         }
         Insert: {
+          departments?: string[]
           job_positions?: string[]
           created_at?: string | null
           created_by?: string | null
@@ -704,6 +712,7 @@ export type Database = {
           vertical_id?: string | null
         }
         Update: {
+          departments?: string[]
           job_positions?: string[]
           created_at?: string | null
           created_by?: string | null
