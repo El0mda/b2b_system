@@ -1,25 +1,13 @@
 import type { WizardTrack } from "@/lib/tracks";
+import type { LeadDraft } from "@/lib/leads";
+import type { LushaFilters } from "@/lib/lusha";
 import type { CampaignSendSettings } from "@/lib/campaign-settings";
 
 export type WizardStepKey = "configure" | "source" | "review" | "sequences" | "launch";
 
-export interface WizardLead {
-  id?: string;
-  email: string;
-  first_name?: string;
-  last_name?: string;
-  full_name?: string;
-  company?: string;
-  job_title?: string;
-  phone?: string;
-  location?: string;
-  linkedin_url?: string;
-  website?: string;
-  nb_result?: string | null;
-  email_valid?: boolean | null;
-  has_work_email?: boolean;
-  has_phones?: boolean;
-}
+// The wizard's leads are the same drafts the Lusha search and the
+// importer produce; the shape lives with them.
+export type WizardLead = LeadDraft;
 
 export interface SenderOption {
   id: string;
@@ -29,26 +17,8 @@ export interface SenderOption {
   is_default: boolean | null;
 }
 
-export interface LushaFilters {
-  company_name?: string;
-  industry?: string;
-  company_sizes?: string[];
-  location?: string;
-  revenue?: string;
-  technologies?: string[];
-  job_titles?: string[];
-  departments?: string[];
-  seniorities?: string[];
-  contact_location?: string;
-  data_points?: string[];
-  max_leads: number;
-}
-
-export interface LushaFilterOption {
-  id: string;
-  name: string;
-  count?: number;
-}
+// Re-exported so the wizard's own files keep importing from here.
+export type { LushaFilters, LushaFilterOption } from "@/lib/lusha";
 
 export interface WizardState {
   campaignName: string;

@@ -14,6 +14,7 @@ import ImportPage from "@/pages/import";
 import NewCampaignPage from "@/pages/campaigns-new";
 import CampaignDetailPage from "@/pages/campaign-detail";
 import LeadsPage from "@/pages/leads";
+import FindLeadsPage from "@/pages/find-leads";
 import SequencesPage from "@/pages/sequences";
 import SenderAccountsPage from "@/pages/sender-accounts";
 import TasksPage from "@/pages/tasks";
@@ -86,6 +87,14 @@ export default function App() {
         element={
           <AuthGate>
             <LeadsPage />
+          </AuthGate>
+        }
+      />
+      <Route
+        path="/leads/find"
+        element={
+          <AuthGate>
+            <FindLeadsPage />
           </AuthGate>
         }
       />

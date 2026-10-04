@@ -2,11 +2,20 @@ import { Check } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { WIZARD_STEPS, type WizardStepKey } from "./types";
 
-export function Stepper({ current }: { current: WizardStepKey }) {
-  const currentIdx = WIZARD_STEPS.findIndex((s) => s.key === current);
+export function Stepper({
+  current,
+  skip = [],
+}: {
+  current: WizardStepKey;
+  // Steps this run doesn't need — a campaign started from leads already
+  // in the database has nothing to search for or import.
+  skip?: WizardStepKey[];
+}) {
+  const steps = WIZARD_STEPS.filter((s) => !skip.includes(s.key));
+  const currentIdx = steps.findIndex((s) => s.key === current);
   return (
     <div className="flex items-center gap-1">
-      {WIZARD_STEPS.map((s, i) => (
+      {steps.map((s, i) => (
         <div key={s.key} className="flex flex-1 items-center">
           <div
             className={cn(
@@ -28,7 +37,7 @@ export function Stepper({ current }: { current: WizardStepKey }) {
           >
             {s.label}
           </div>
-          {i < WIZARD_STEPS.length - 1 && (
+          {i < steps.length - 1 && (
             <div
               className={cn(
                 "mx-3 h-0.5 flex-1 rounded transition-colors",

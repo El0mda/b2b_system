@@ -151,6 +151,12 @@ async function handleSearch(body: any, apiKey: string): Promise<Response> {
   const contactFilters: Record<string, any> = {};
   const companyFilters: Record<string, any> = {};
 
+  // Finding one named person rather than a segment. Lusha's accepted
+  // contact filters aren't fully documented and this one is the odd
+  // shape out, so the request below retries without it if the API
+  // refuses it — a name search then degrades to the other filters
+  // instead of returning nothing.
+  if (body.contact_names?.length) contactFilters.names = body.contact_names;
   if (body.job_titles?.length) contactFilters.jobTitles = body.job_titles;
   if (body.departments?.length) contactFilters.departments = body.departments;
   if (body.seniorities?.length)
@@ -200,23 +206,42 @@ async function handleSearch(body: any, apiKey: string): Promise<Response> {
     },
   };
 
-  const res = await fetch(`${LUSHA_API}/prospecting/contact/search`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json", api_key: apiKey },
-    body: JSON.stringify(payload),
-  });
-  if (!res.ok) {
-    const text = await res.text();
+  const attempt = async () => {
+    const r = await fetch(`${LUSHA_API}/prospecting/contact/search`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", api_key: apiKey },
+      body: JSON.stringify(payload),
+    });
+    return { ok: r.ok, status: r.status, text: await r.text() };
+  };
+
+  let out = await attempt();
+  let nameFilterIgnored = false;
+  // Only for a rejection that actually blames the name filter: a 400
+  // about anything else would come back the same way on a retry.
+  if (
+    !out.ok &&
+    out.status === 400 &&
+    contactFilters.names &&
+    /name/i.test(out.text)
+  ) {
+    delete contactFilters.names;
+    nameFilterIgnored = true;
+    out = await attempt();
+  }
+
+  if (!out.ok) {
     return json(
-      { error: `Lusha search failed (${res.status}): ${text.slice(0, 300)}` },
+      { error: `Lusha search failed (${out.status}): ${out.text.slice(0, 300)}` },
       502,
     );
   }
-  const data = await res.json();
+  const data = JSON.parse(out.text);
   return json({
     requestId: data.requestId,
     totalResults: data.totalResults,
     prospects: data.data ?? data.contacts ?? [],
+    nameFilterIgnored,
   });
 }
 

@@ -142,12 +142,18 @@ export function StepLaunch({
     try {
       setPhase("saving");
 
+      // Leads saved earlier from the Find Leads page are already rows in
+      // the database; they get attached to this campaign below rather
+      // than inserted, and the duplicate check below would otherwise
+      // throw every one of them out for existing.
+      const alreadySaved = selectedLeads.filter((l) => l.lead_id);
+      let freshLeads = selectedLeads.filter((l) => !l.lead_id);
+
       // Final cross-source dedup safety net — the Lusha search step and
       // the import tab each dedup within their own source, but a lead
       // reaching this common launch point could still already exist in
       // the org from the *other* source (or an earlier campaign).
-      let newLeads = selectedLeads;
-      const emails = selectedLeads.map((l) => l.email).filter(Boolean);
+      const emails = freshLeads.map((l) => l.email).filter(Boolean);
       if (emails.length > 0) {
         const existing = new Set<string>();
         const CHUNK = 500;
@@ -160,16 +166,18 @@ export function StepLaunch({
             .in("email", slice);
           (data ?? []).forEach((r: any) => r.email && existing.add(r.email.toLowerCase()));
         }
-        newLeads = selectedLeads.filter(
+        freshLeads = freshLeads.filter(
           (l) => !l.email || !existing.has(l.email.toLowerCase()),
         );
-        const skipped = selectedLeads.length - newLeads.length;
+        const skipped =
+          selectedLeads.length - alreadySaved.length - freshLeads.length;
         if (skipped > 0) {
           toast.info(
             `${skipped} lead${skipped === 1 ? "" : "s"} already in your database — skipped`,
           );
         }
       }
+      let newLeads = [...alreadySaved, ...freshLeads];
       if (newLeads.length === 0) {
         toast.error("All selected leads are already in your database");
         setPhase("idle");
@@ -192,6 +200,14 @@ export function StepLaunch({
         return;
       }
 
+      // A campaign built entirely from the Leads page didn't search or
+      // import anything of its own.
+      const campaignSource = newLeads.every((l) => l.lead_id)
+        ? "saved"
+        : state.sourceTab === "lusha"
+          ? "lusha"
+          : "import";
+
       const leadsSearched = newLeads.length;
       const leadsEnriched = newLeads.filter((l) => l.has_work_email || !!l.email).length;
       const leadsVerified = newLeads.filter((l) => l.nb_result).length;
@@ -203,7 +219,7 @@ export function StepLaunch({
           created_by: profile?.id ?? null,
           name: state.campaignName.trim(),
           status: "active",
-          source: state.sourceTab === "lusha" ? "lusha" : "import",
+          source: campaignSource,
           sender_email: state.sender_email,
           sender_name: state.sender_name ?? "",
           reply_to_email: state.reply_to_email || state.sender_email,
@@ -250,9 +266,17 @@ export function StepLaunch({
         ]),
       );
 
-      const leadRows = newLeads.map((l) => ({
+      const trackIdFor = (l: (typeof newLeads)[number]) =>
+        trackIdByKey.get(routed.byLead.get(leadKey(l)) ?? "") ?? null;
+      // Routing may have dropped leads, so re-split rather than reusing
+      // the pre-routing lists.
+      const toInsert = newLeads.filter((l) => !l.lead_id);
+      const toAttach = newLeads.filter((l) => l.lead_id);
+
+      const leadRows = toInsert.map((l) => ({
         org_id: orgId,
         campaign_id: campaign.id,
+        created_by: profile?.id ?? null,
         source: state.sourceTab === "lusha" ? "lusha" : "import",
         contact_id: l.id ?? null,
         email: l.email,
@@ -269,22 +293,72 @@ export function StepLaunch({
         nb_result: l.nb_result ?? null,
         added_to_campaign: true,
         current_step: 1,
-        track_id: trackIdByKey.get(routed.byLead.get(leadKey(l)) ?? "") ?? null,
+        track_id: trackIdFor(l),
       }));
-      const { data: insertedLeads, error: leadsError } = await supabase
-        .from("leads")
-        .insert(leadRows)
-        .select("id, email, first_name, last_name, full_name, company, job_title, location, track_id");
-      if (leadsError) throw leadsError;
+      const LEAD_COLUMNS =
+        "id, email, first_name, last_name, full_name, company, job_title, location, track_id";
+      const campaignLeads: Array<{
+        id: string;
+        email: string | null;
+        first_name: string | null;
+        last_name: string | null;
+        full_name: string | null;
+        company: string | null;
+        job_title: string | null;
+        location: string | null;
+        track_id: string | null;
+      }> = [];
+
+      if (leadRows.length > 0) {
+        const { data, error: leadsError } = await supabase
+          .from("leads")
+          .insert(leadRows)
+          .select(LEAD_COLUMNS);
+        if (leadsError) throw leadsError;
+        campaignLeads.push(...(data ?? []));
+      }
+
+      // Leads that already existed keep their row — and their history,
+      // their owner and their Odoo link — and simply join the campaign.
+      // One update per sequence, since that's the only field that
+      // differs between them.
+      if (toAttach.length > 0) {
+        const idsByTrack = new Map<string | null, string[]>();
+        for (const l of toAttach) {
+          const trackId = trackIdFor(l);
+          const group = idsByTrack.get(trackId) ?? [];
+          group.push(l.lead_id as string);
+          idsByTrack.set(trackId, group);
+        }
+        for (const [trackId, ids] of idsByTrack) {
+          const { data, error: attachError } = await supabase
+            .from("leads")
+            .update({
+              campaign_id: campaign.id,
+              track_id: trackId,
+              added_to_campaign: true,
+              current_step: 1,
+            })
+            .in("id", ids)
+            .select(LEAD_COLUMNS);
+          if (attachError) throw attachError;
+          campaignLeads.push(...(data ?? []));
+        }
+      }
 
       if (orgId && profile) {
-        const source = state.sourceTab === "lusha" ? "via Lusha" : "via import";
+        const source =
+          campaignSource === "saved"
+            ? "from saved leads"
+            : campaignSource === "lusha"
+              ? "via Lusha"
+              : "via import";
         logActivity({
           orgId,
           actorId: profile.id,
           action: "campaign_launched",
           summary: `${profile.full_name ?? profile.email} launched campaign "${state.campaignName.trim()}" with ${newLeads.length} leads (${source})`,
-          metadata: { campaign_id: campaign.id, leads_count: newLeads.length, source: state.sourceTab },
+          metadata: { campaign_id: campaign.id, leads_count: newLeads.length, source: campaignSource },
         });
       }
 
@@ -324,7 +398,7 @@ export function StepLaunch({
           await createCallTasks({
             steps: track.steps,
             sequences: insertedSequences ?? [],
-            leads: (insertedLeads ?? []).filter((l) => l.track_id === trackId),
+            leads: campaignLeads.filter((l) => l.track_id === trackId),
             orgId: orgId!,
             campaignId: campaign.id,
             userId: profile?.id ?? null,
@@ -393,9 +467,11 @@ export function StepLaunch({
       // billing counter would be worse than under-counting. But it is
       // logged: this call silently failed against a function that didn't
       // exist for the whole life of the launch flow (fixed in 0016).
+      // Leads saved from the Find Leads page were billed when they were
+      // revealed, so only the ones this launch created count again.
       const { error: usageError } = await supabase.rpc("increment_leads_used", {
         p_org_id: orgId,
-        p_amount: newLeads.length,
+        p_amount: toInsert.length,
       });
       if (usageError) {
         console.error("Failed to record lead usage:", usageError.message);

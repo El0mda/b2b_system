@@ -2,7 +2,7 @@ import { useState, useMemo } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { format } from "date-fns";
 import { toast } from "sonner";
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import {
   Search,
   Download,
@@ -25,6 +25,8 @@ import {
   Boxes,
   Send,
   Loader2,
+  Rocket,
+  UserPlus,
 } from "lucide-react";
 
 import { supabase } from "@/lib/supabase";
@@ -34,6 +36,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
+import { Checkbox } from "@/components/ui/checkbox";
 import { FullPageSpinner } from "@/components/ui/spinner";
 import { cn } from "@/lib/utils";
 
@@ -84,7 +87,11 @@ export default function LeadsPage() {
   const [page, setPage] = useState(0);
   const [selectedLead, setSelectedLead] = useState<LeadRow | null>(null);
   const [pushingId, setPushingId] = useState<string | null>(null);
+  // Leads ticked for a new campaign. Only leads not already in one can
+  // be ticked — see startCampaign below.
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const qc = useQueryClient();
+  const navigate = useNavigate();
 
   // The automatic push only fires on a click or a reply. This is the
   // manual override: any lead, at any point, straight into the Odoo
@@ -166,7 +173,9 @@ export default function LeadsPage() {
         const name = (l.full_name ?? `${l.first_name ?? ""} ${l.last_name ?? ""}`).toLowerCase();
         if (!name.includes(q) && !(l.email ?? "").toLowerCase().includes(q) && !(l.company ?? "").toLowerCase().includes(q) && !(l.job_title ?? "").toLowerCase().includes(q)) return false;
       }
-      if (campaignFilter !== "all" && l.campaign_id !== campaignFilter) return false;
+      if (campaignFilter === "none" && l.campaign_id) return false;
+      if (campaignFilter !== "all" && campaignFilter !== "none" && l.campaign_id !== campaignFilter)
+        return false;
       if (sourceFilter !== "all" && (l.source ?? "manual") !== sourceFilter) return false;
       if (emailStatusFilter === "valid" && !l.email_valid) return false;
       if (emailStatusFilter === "invalid" && l.email_valid !== false) return false;
@@ -181,14 +190,40 @@ export default function LeadsPage() {
     });
   }, [allLeads, search, campaignFilter, sourceFilter, emailStatusFilter, engagementFilter, odooFilter]);
 
+  // Leads saved from a search and not yet used — the pool a campaign
+  // can be started from.
+  const unassignedCount = useMemo(
+    () => allLeads.filter((l) => !l.campaign_id).length,
+    [allLeads],
+  );
+
   const odooCounts = useMemo(() => {
     let synced = 0;
     for (const l of allLeads) if (l.synced_to_odoo) synced++;
     return { synced, notSynced: allLeads.length - synced };
   }, [allLeads]);
 
+  // A lead already in a campaign stays there: adding it to a second one
+  // would have SmartLead emailing the same person down two sequences.
+  const canSelect = (l: LeadRow) => !l.campaign_id && !!l.email;
+
+  const toggleOne = (id: string) =>
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+
+  const startCampaign = () => {
+    const ids = [...selectedIds];
+    if (ids.length === 0) return;
+    navigate("/campaigns/new", { state: { leadIds: ids } });
+  };
+
   const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
   const paged = filtered.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE);
+  const selectablePaged = paged.filter(canSelect);
 
   const handleExport = () => {
     const headers = ["Name", "Email", "Company", "Title", "Campaign", "Source", "Email Status", "Engagement", "Reply", "Date"];
@@ -224,9 +259,14 @@ export default function LeadsPage() {
           <span className="rounded-full bg-muted px-3 py-1 text-sm font-medium">{allLeads.length}</span>
         </div>
         <div className="flex flex-wrap gap-2">
-          {/* Import lives here rather than in the main menu: it's how
-              leads get into this list. */}
+          {/* Search and import both live here rather than in the main
+              menu: they're how leads get into this list. */}
           <Button asChild>
+            <Link to="/leads/find">
+              <UserPlus className="h-4 w-4" /> Find leads
+            </Link>
+          </Button>
+          <Button variant="outline" asChild>
             <Link to="/import">
               <Upload className="h-4 w-4" /> Import leads
             </Link>
@@ -237,7 +277,18 @@ export default function LeadsPage() {
         </div>
       </div>
 
-      <div className="grid gap-4 sm:grid-cols-2">
+      <div className="grid gap-4 sm:grid-cols-3">
+        <OdooStatCard
+          icon={UserPlus}
+          label="Not in a campaign"
+          value={unassignedCount}
+          hint="Tick them below to launch one"
+          color="bg-indigo-500"
+          onClick={() => {
+            setCampaignFilter("none");
+            setPage(0);
+          }}
+        />
         <OdooStatCard
           icon={Boxes}
           label="Synced to Odoo"
@@ -266,6 +317,23 @@ export default function LeadsPage() {
         />
       </div>
 
+      {selectedIds.size > 0 && (
+        <div className="flex flex-wrap items-center justify-between gap-3 rounded-md border border-primary/30 bg-primary/5 p-3">
+          <p className="text-sm">
+            <strong>{selectedIds.size}</strong> lead
+            {selectedIds.size === 1 ? "" : "s"} selected
+          </p>
+          <div className="flex gap-2">
+            <Button variant="ghost" size="sm" onClick={() => setSelectedIds(new Set())}>
+              Clear
+            </Button>
+            <Button size="sm" onClick={startCampaign}>
+              <Rocket className="h-4 w-4" /> Start campaign with these leads
+            </Button>
+          </div>
+        </div>
+      )}
+
       <Card>
         <CardContent className="p-0">
           {/* Filters */}
@@ -281,6 +349,7 @@ export default function LeadsPage() {
             </div>
             <Select value={campaignFilter} onChange={(e) => { setCampaignFilter(e.target.value); setPage(0); }}>
               <option value="all">All Campaigns</option>
+              <option value="none">No campaign yet</option>
               {campaigns.map((c) => (
                 <option key={c.id} value={c.id}>{c.name}</option>
               ))}
@@ -316,6 +385,25 @@ export default function LeadsPage() {
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b border-border bg-muted/30">
+                  <Th className="w-10">
+                    <Checkbox
+                      checked={
+                        selectablePaged.length > 0 &&
+                        selectablePaged.every((l) => selectedIds.has(l.id))
+                      }
+                      onCheckedChange={(v) =>
+                        setSelectedIds((prev) => {
+                          const next = new Set(prev);
+                          // Only the leads visible on this page, so a
+                          // filtered view can't silently select more.
+                          selectablePaged.forEach((l) =>
+                            v ? next.add(l.id) : next.delete(l.id),
+                          );
+                          return next;
+                        })
+                      }
+                    />
+                  </Th>
                   <Th>Name</Th>
                   <Th>Email</Th>
                   <Th>Company</Th>
@@ -336,6 +424,20 @@ export default function LeadsPage() {
                     className="cursor-pointer border-b border-border transition-colors hover:bg-muted/40"
                     onClick={() => setSelectedLead(l)}
                   >
+                    <Td onClick={(e) => e.stopPropagation()}>
+                      <Checkbox
+                        checked={selectedIds.has(l.id)}
+                        disabled={!canSelect(l)}
+                        title={
+                          l.campaign_id
+                            ? "Already in a campaign"
+                            : !l.email
+                              ? "No email address"
+                              : undefined
+                        }
+                        onCheckedChange={() => toggleOne(l.id)}
+                      />
+                    </Td>
                     <Td className="font-medium">
                       {(l.full_name ?? `${l.first_name ?? ""} ${l.last_name ?? ""}`.trim()) || "—"}
                     </Td>
@@ -377,7 +479,7 @@ export default function LeadsPage() {
                 ))}
                 {paged.length === 0 && (
                   <tr>
-                    <td colSpan={11} className="p-12 text-center text-sm text-muted-foreground">
+                    <td colSpan={12} className="p-12 text-center text-sm text-muted-foreground">
                       No leads found.
                     </td>
                   </tr>
@@ -416,8 +518,23 @@ export default function LeadsPage() {
   );
 }
 
-function Th({ children }: { children: React.ReactNode }) {
-  return <th className="whitespace-nowrap px-4 py-3 text-left text-xs font-medium uppercase tracking-wide text-muted-foreground">{children}</th>;
+function Th({
+  children,
+  className,
+}: {
+  children: React.ReactNode;
+  className?: string;
+}) {
+  return (
+    <th
+      className={cn(
+        "whitespace-nowrap px-4 py-3 text-left text-xs font-medium uppercase tracking-wide text-muted-foreground",
+        className,
+      )}
+    >
+      {children}
+    </th>
+  );
 }
 
 function Td({

@@ -5,6 +5,12 @@ export interface LushaFilterOption {
 }
 
 export interface LushaFilters {
+  /**
+   * Specific people by name, for finding one person rather than a
+   * segment. Lusha's own filter set is segment-shaped, so the proxy
+   * drops this and says so if the API won't take it.
+   */
+  contact_names?: string[];
   company_name?: string;
   industry?: string;
   company_sizes?: string[];
@@ -66,3 +72,21 @@ export const DATA_POINT_OPTIONS = [
   { id: "company_size", name: "Company Size" },
   { id: "linkedin_url", name: "LinkedIn URL" },
 ];
+
+/** A blank search: every filter off, the wizard's long-standing default
+ * of 100 leads (fetched 50 per page — Lusha's hard maximum). */
+export const DEFAULT_LUSHA_FILTERS: LushaFilters = {
+  contact_names: [],
+  company_name: "",
+  industry: "",
+  company_sizes: [],
+  location: "",
+  revenue: "",
+  technologies: [],
+  job_titles: [],
+  departments: [],
+  seniorities: [],
+  contact_location: "",
+  data_points: [],
+  max_leads: 100,
+};

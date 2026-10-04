@@ -8,7 +8,7 @@ Open the Supabase dashboard → **SQL Editor** → New query → paste each file
 
 1. `migrations/0001_initial_schema.sql` — creates all tables and indexes
 2. `migrations/0002_rls_policies.sql` — enables RLS and adds org-scoped policies
-3. …through `migrations/0028_member_data_isolation.sql` (0019 creates the public `email-media` storage bucket; 0020 gives sender accounts an owner)
+3. …through `migrations/0030_standalone_leads.sql` (0019 creates the public `email-media` storage bucket; 0020 gives sender accounts an owner; 0030 gives leads an owner so a lead with no campaign is still visible to whoever found it)
 
 Run each file **once**, in order. They are individually idempotent, but
 re-running an **earlier** file after later ones is not safe: 0002 creates
@@ -36,6 +36,7 @@ supabase functions deploy campaign-action
 supabase functions deploy send-campaign   # re-deploy after 0018/0019: filters call steps, embeds photos/videos
 supabase functions deploy smartlead-sync --no-verify-jwt
 supabase functions deploy smartlead-webhooks --no-verify-jwt
+supabase functions deploy lusha-proxy     # re-deploy for the Find Leads page: search by person name
 ```
 
 `odoo-push` verifies the caller's JWT, so it must **not** be deployed with `--no-verify-jwt`.
