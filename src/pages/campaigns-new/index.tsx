@@ -13,6 +13,7 @@ import { StepSequences } from "./step-sequences";
 import { StepLaunch } from "./step-launch";
 import { DEFAULT_SEND_SETTINGS } from "@/lib/campaign-settings";
 import { DEFAULT_LUSHA_FILTERS } from "@/lib/lusha";
+import { emailableIds } from "@/lib/leads";
 import { type WizardLead, type WizardState, type WizardStepKey } from "./types";
 
 const INITIAL_STATE: WizardState = {
@@ -93,7 +94,7 @@ export default function NewCampaignPage() {
       setState((p) => ({
         ...p,
         leads,
-        selectedLeadIds: new Set(leads.map((_, i) => String(i))),
+        selectedLeadIds: emailableIds(leads),
       }));
       setLoadingSaved(false);
       if (leads.length < preselectedIds.length) {

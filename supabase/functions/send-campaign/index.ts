@@ -222,6 +222,12 @@ type LaunchOutcome =
  * half-built campaign is deleted, so a retry starts clean instead of
  * leaving an orphan behind in SmartLead.
  */
+/** Mirrors hasRealEmail in src/lib/leads.ts. */
+function hasRealEmail(email: string | null | undefined): boolean {
+  const e = (email ?? "").trim();
+  return e.includes("@") && !/@unknown\.com$/i.test(e);
+}
+
 async function launchOnSmartlead(
   input: { name: string; leads: Lead[]; sequences: SequenceRow[] },
   ctx: LaunchContext,
@@ -234,6 +240,17 @@ async function launchOnSmartlead(
   const emailSteps = buildEmailSteps(input.sequences);
   if (emailSteps.length === 0) {
     return { ok: false, error: "This sequence has no email steps — nothing for SmartLead to send" };
+  }
+
+  // A Lusha contact with no email is stored under a made-up
+  // first.last@unknown.com. Those stay in the campaign for its call and
+  // WhatsApp steps but never reach SmartLead: every one would bounce.
+  const leads = input.leads.filter((l) => hasRealEmail(l.email));
+  if (leads.length === 0) {
+    return {
+      ok: false,
+      error: "None of these leads has an email address — nothing for SmartLead to send",
+    };
   }
 
   // ── Step A: Create SmartLead campaign ──
@@ -283,7 +300,7 @@ async function launchOnSmartlead(
   const leadsRes = await smartleadFetch(`/campaigns/${slCampaignId}/leads`, smartleadKey, {
     method: "POST",
     body: JSON.stringify({
-      lead_list: input.leads.map((l) => ({
+      lead_list: leads.map((l) => ({
         email: l.email,
         first_name: l.first_name ?? l.full_name?.split(" ")[0] ?? "",
         last_name: l.last_name ?? l.full_name?.split(" ").slice(1).join(" ") ?? "",
@@ -308,7 +325,7 @@ async function launchOnSmartlead(
   // The add-leads response doesn't return per-lead ids, so read them back
   // via the campaign's lead list. smartlead-sync needs them later.
   try {
-    const emailToLocalId = new Map(input.leads.map((l) => [l.email.toLowerCase(), l.id]));
+    const emailToLocalId = new Map(leads.map((l) => [l.email.toLowerCase(), l.id]));
     let offset = 0;
     const limit = 100;
     for (;;) {

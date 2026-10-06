@@ -35,6 +35,24 @@ export interface LeadDraft {
   has_phones?: boolean;
 }
 
+/**
+ * Whether a lead has an address worth emailing. A Lusha contact with no
+ * email is saved under a made-up `first.last@unknown.com` (the column
+ * can't be empty), which must never be sent to: every one bounces and
+ * costs the sending domain reputation.
+ */
+export function hasRealEmail(email: string | null | undefined): boolean {
+  const e = (email ?? "").trim();
+  return e.includes("@") && !/@unknown\.com$/i.test(e);
+}
+
+/** Wizard selection ids (row indexes) for the leads that can be emailed. */
+export function emailableIds(leads: { email?: string | null }[]): Set<string> {
+  return new Set(
+    leads.flatMap((l, i) => (hasRealEmail(l.email) ? [String(i)] : [])),
+  );
+}
+
 export function leadDisplayName(l: {
   full_name?: string | null;
   first_name?: string | null;

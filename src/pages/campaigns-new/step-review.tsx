@@ -1,4 +1,5 @@
 import { ArrowRight, Users, Mail, AlertCircle } from "lucide-react";
+import { emailableIds, hasRealEmail } from "@/lib/leads";
 
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -30,18 +31,23 @@ export function StepReview({
   const validEmails = state.leads.filter(
     (l, i) =>
       state.selectedLeadIds.has(String(i)) &&
+      hasRealEmail(l.email) &&
       (l.email_valid === null || l.email_valid === undefined || l.email_valid === true),
   ).length;
+  // Ticked but never emailed: a bad address, or none at all (kept only for
+  // a sequence's call or WhatsApp steps — the launch never emails them).
   const invalid = state.leads.filter(
-    (_, i) =>
+    (l, i) =>
       state.selectedLeadIds.has(String(i)) &&
-      state.leads[i].email_valid === false,
+      (l.email_valid === false || !hasRealEmail(l.email)),
   ).length;
 
   const toggleAll = (next: boolean) => {
     setState((p) => ({
       ...p,
-      selectedLeadIds: next ? new Set(p.leads.map((_, i) => String(i))) : new Set(),
+      // "All" means everyone who can be emailed; a lead with no email can
+      // still be ticked by hand, for a sequence's call or WhatsApp steps.
+      selectedLeadIds: next ? emailableIds(p.leads) : new Set(),
     }));
   };
 
@@ -63,7 +69,7 @@ export function StepReview({
         <SummaryCard icon={Mail} label="Valid emails" value={validEmails} color="bg-emerald-500" />
         <SummaryCard
           icon={AlertCircle}
-          label="Invalid / unverified"
+          label="Invalid / no email"
           value={invalid}
           color="bg-amber-500"
         />
@@ -84,7 +90,7 @@ export function StepReview({
                 <TableRow>
                   <TableHead className="w-10">
                     <Checkbox
-                      checked={selected === total && total > 0}
+                      checked={selected > 0 && selected >= emailableIds(state.leads).size}
                       onCheckedChange={toggleAll}
                     />
                   </TableHead>
@@ -109,12 +115,22 @@ export function StepReview({
                       <TableCell className="font-medium">
                         {(l.full_name ?? `${l.first_name ?? ""} ${l.last_name ?? ""}`.trim()) || "—"}
                       </TableCell>
-                      <TableCell>{l.email}</TableCell>
+                      <TableCell>
+                        {hasRealEmail(l.email) ? (
+                          l.email
+                        ) : (
+                          <span className="text-muted-foreground">—</span>
+                        )}
+                      </TableCell>
                       <TableCell className="text-muted-foreground">{l.company ?? "—"}</TableCell>
                       <TableCell className="text-muted-foreground">{l.job_title ?? "—"}</TableCell>
                       <TableCell className="text-muted-foreground">{l.phone ?? "—"}</TableCell>
                       <TableCell>
-                        {nb === null ? (
+                        {!hasRealEmail(l.email) ? (
+                          <Badge className="bg-destructive/10 text-destructive">
+                            No email — won't be emailed
+                          </Badge>
+                        ) : nb === null ? (
                           <Badge variant="secondary">Not run</Badge>
                         ) : nb === "valid" || nb === "catchall" ? (
                           <Badge variant="success">{nb}</Badge>

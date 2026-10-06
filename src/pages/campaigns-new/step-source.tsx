@@ -39,6 +39,7 @@ import {
 } from "@/lib/file-parser";
 import { cn } from "@/lib/utils";
 import { LushaSearch } from "@/components/lusha/lusha-search";
+import { emailableIds } from "@/lib/leads";
 import type { WizardLead, WizardState } from "./types";
 
 const MAX_FILE_SIZE = 10 * 1024 * 1024;
@@ -152,9 +153,15 @@ function LushaTab({
         setState((p) => ({
           ...p,
           leads,
-          selectedLeadIds: new Set(leads.map((_, i) => String(i))),
+          selectedLeadIds: emailableIds(leads),
         }));
-        toast.success(`${leads.length} leads enriched`);
+        const noEmail = leads.length - emailableIds(leads).size;
+        toast.success(
+          `${leads.length} leads enriched` +
+            (noEmail > 0
+              ? ` · ${noEmail} with no email left unticked — they won't be emailed`
+              : ""),
+        );
       }}
     />
   );
@@ -306,7 +313,7 @@ function ImportTab({
     setState((p) => ({
       ...p,
       leads,
-      selectedLeadIds: new Set(leads.map((_, i) => String(i))),
+      selectedLeadIds: emailableIds(leads),
     }));
     toast.success(
       `${leads.length} leads loaded${verify ? " and verified" : ""}` +
