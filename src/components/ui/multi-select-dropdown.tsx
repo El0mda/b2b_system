@@ -1,8 +1,7 @@
-import { useState, type ReactNode } from "react";
-import { ChevronDown, Search } from "lucide-react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
+import { Check, ChevronDown, Search } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { DropdownMenu } from "./dropdown-menu";
-import { Checkbox } from "./checkbox";
 import { Input } from "./input";
 import type { LushaFilterOption } from "@/lib/lusha";
 
@@ -13,6 +12,7 @@ export function MultiSelectDropdown({
   onChange,
   placeholder = "Any",
   emptyMessage = "No options",
+  single = false,
 }: {
   icon?: ReactNode;
   options: LushaFilterOption[];
@@ -20,10 +20,18 @@ export function MultiSelectDropdown({
   onChange: (next: string[]) => void;
   placeholder?: string;
   emptyMessage?: string;
+  /** Pick at most one: choosing an option replaces the last and closes the list. */
+  single?: boolean;
 }) {
   const [filter, setFilter] = useState("");
 
-  const toggle = (id: string) => {
+  const pick = (id: string, close: () => void) => {
+    if (single) {
+      onChange(selected.includes(id) ? [] : [id]);
+      setFilter("");
+      close();
+      return;
+    }
     onChange(
       selected.includes(id)
         ? selected.filter((v) => v !== id)
@@ -66,44 +74,50 @@ export function MultiSelectDropdown({
         </button>
       }
     >
-      {() => (
+      {(close) => (
         <div className="flex max-h-72 w-full flex-col">
           {options.length > 6 && (
-            <div className="relative border-b border-border p-1.5">
-              <Search className="pointer-events-none absolute left-4 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
-              <Input
-                value={filter}
-                onChange={(e) => setFilter(e.target.value)}
-                placeholder="Filter..."
-                className="h-7 pl-7 text-xs"
-                autoFocus
-              />
-            </div>
+            <FilterBox value={filter} onChange={setFilter} />
           )}
-          <div className="overflow-auto py-1">
+          <div className="overflow-auto overscroll-contain py-1">
             {visible.length === 0 ? (
               <p className="px-3 py-2 text-xs text-muted-foreground">
-                {emptyMessage}
+                {filter ? `Nothing matches "${filter}"` : emptyMessage}
               </p>
             ) : (
               visible.map((o) => {
                 const checked = selected.includes(o.id);
+                // A plain button with a drawn checkbox: the shared Checkbox
+                // is itself a <label>, and a label inside a label toggles
+                // unreliably — the "can't select anything" bug.
                 return (
-                  <label
+                  <button
                     key={o.id}
-                    className="flex cursor-pointer items-center gap-2 px-3 py-1.5 text-sm hover:bg-muted"
+                    type="button"
+                    onClick={() => pick(o.id, close)}
+                    className={cn(
+                      "flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm hover:bg-muted",
+                      checked && "font-medium",
+                    )}
                   >
-                    <Checkbox
-                      checked={checked}
-                      onCheckedChange={() => toggle(o.id)}
-                    />
+                    <span
+                      className={cn(
+                        "inline-flex h-4 w-4 shrink-0 items-center justify-center border transition-colors",
+                        single ? "rounded-full" : "rounded",
+                        checked
+                          ? "border-primary bg-primary text-white"
+                          : "border-input bg-background",
+                      )}
+                    >
+                      {checked && <Check className="h-3 w-3" strokeWidth={3} />}
+                    </span>
                     <span className="flex-1 truncate">{o.name}</span>
                     {o.count != null && (
                       <span className="text-xs text-muted-foreground">
                         {o.count}
                       </span>
                     )}
-                  </label>
+                  </button>
                 );
               })
             )}
@@ -113,7 +127,10 @@ export function MultiSelectDropdown({
               <button
                 type="button"
                 className="w-full rounded px-2 py-1 text-left text-xs text-muted-foreground hover:bg-muted hover:text-foreground"
-                onClick={() => onChange([])}
+                onClick={() => {
+                  onChange([]);
+                  if (single) close();
+                }}
               >
                 Clear selection
               </button>
@@ -122,5 +139,32 @@ export function MultiSelectDropdown({
         </div>
       )}
     </DropdownMenu>
+  );
+}
+
+/** The list's type-to-filter box. Focused without scrolling: a focus that
+ * scrolls the page closes the dropdown it sits in. */
+function FilterBox({
+  value,
+  onChange,
+}: {
+  value: string;
+  onChange: (v: string) => void;
+}) {
+  const ref = useRef<HTMLInputElement>(null);
+  useEffect(() => {
+    ref.current?.focus({ preventScroll: true });
+  }, []);
+  return (
+    <div className="relative border-b border-border p-1.5">
+      <Search className="pointer-events-none absolute left-4 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
+      <Input
+        ref={ref}
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        placeholder="Type to filter..."
+        className="h-7 pl-7 text-xs"
+      />
+    </div>
   );
 }

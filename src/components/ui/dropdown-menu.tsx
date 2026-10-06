@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { cn } from "@/lib/utils";
 
@@ -25,15 +25,19 @@ export function DropdownMenu({
 
   // Rendered in a portal so ancestors with `overflow: auto/hidden` (e.g. a
   // scrollable table wrapper) can't clip the panel.
-  useLayoutEffect(() => {
-    if (!open || !triggerRef.current) return;
+  const place = useCallback(() => {
+    if (!triggerRef.current) return;
     const rect = triggerRef.current.getBoundingClientRect();
     setPos({
       top: rect.bottom + window.scrollY + 6,
       left: align === "end" ? rect.right + window.scrollX : rect.left + window.scrollX,
       width: rect.width,
     });
-  }, [open, align]);
+  }, [align]);
+
+  useLayoutEffect(() => {
+    if (open) place();
+  }, [open, place]);
 
   useEffect(() => {
     if (!open) return;
@@ -46,7 +50,14 @@ export function DropdownMenu({
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") setOpen(false);
     };
-    const onScrollOrResize = () => setOpen(false);
+    // A scroll anywhere — the page, the app's scrolling main area, or a
+    // wheel that ran off the end of the option list — moves the panel with
+    // its trigger. Closing instead meant a long list shut itself the
+    // moment you scrolled it.
+    const onScrollOrResize = (e: Event) => {
+      if (e.target instanceof Node && panelRef.current?.contains(e.target)) return;
+      place();
+    };
     document.addEventListener("mousedown", onClick);
     document.addEventListener("keydown", onKey);
     window.addEventListener("scroll", onScrollOrResize, true);
@@ -57,7 +68,7 @@ export function DropdownMenu({
       window.removeEventListener("scroll", onScrollOrResize, true);
       window.removeEventListener("resize", onScrollOrResize);
     };
-  }, [open]);
+  }, [open, place]);
 
   return (
     <div
@@ -85,7 +96,7 @@ export function DropdownMenu({
                   : undefined,
             }}
             className={cn(
-              "z-50 min-w-[10rem] animate-scale-in overflow-hidden rounded-xl border border-border bg-card py-1.5 shadow-premium-lg",
+              "z-50 min-w-[10rem] animate-scale-in overflow-hidden overscroll-contain rounded-xl border border-border bg-card py-1.5 shadow-premium-lg",
               align === "end" && !matchTriggerWidth
                 ? "origin-top-right"
                 : "origin-top-left",

@@ -10,7 +10,7 @@
 // drift apart. What happens to the leads afterwards is the caller's,
 // through onLeads.
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { toast } from "sonner";
 import {
   Search,
@@ -30,6 +30,7 @@ import {
 } from "lucide-react";
 
 import { supabase } from "@/lib/supabase";
+import { cn } from "@/lib/utils";
 import { lookupVerification, verifyEmails } from "@/lib/verify-emails";
 import { useAuth } from "@/hooks/use-auth";
 import { Button } from "@/components/ui/button";
@@ -48,7 +49,12 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import type { LushaFilterOption, LushaFilters, LushaProspect } from "@/lib/lusha";
+import {
+  DEFAULT_LUSHA_FILTERS,
+  type LushaFilterOption,
+  type LushaFilters,
+  type LushaProspect,
+} from "@/lib/lusha";
 import type { LeadDraft } from "@/lib/leads";
 import {
   DEFAULT_LOCATIONS,
@@ -104,37 +110,10 @@ export function LushaSearch({
     new Set(),
   );
 
-  // autocomplete states
-  const [companyQuery, setCompanyQuery] = useState("");
-  const [companySuggestions, setCompanySuggestions] = useState<
-    LushaFilterOption[]
-  >([]);
-  const [locationQuery, setLocationQuery] = useState("");
-  const [locationSuggestions, setLocationSuggestions] = useState<
-    LushaFilterOption[]
-  >([]);
-  const [techQuery, setTechQuery] = useState("");
-  const [techSuggestions, setTechSuggestions] = useState<LushaFilterOption[]>(
-    [],
-  );
-  const [nameInput, setNameInput] = useState("");
-  const [jobTitleInput, setJobTitleInput] = useState("");
-  const [jobTitleSuggestions, setJobTitleSuggestions] = useState<
-    LushaFilterOption[]
-  >([]);
-  const [contactLocationQuery, setContactLocationQuery] = useState("");
-  const [contactLocationSuggestions, setContactLocationSuggestions] =
-    useState<LushaFilterOption[]>([]);
-
-  const companyTimeout = useRef<ReturnType<typeof setTimeout>>();
-  const locationTimeout = useRef<ReturnType<typeof setTimeout>>();
-  const techTimeout = useRef<ReturnType<typeof setTimeout>>();
-  const jobTitleTimeout = useRef<ReturnType<typeof setTimeout>>();
-  const contactLocationTimeout = useRef<ReturnType<typeof setTimeout>>();
-
-
-  // Fetch filter options on mount
-  useEffect(() => {
+  // Fetch filter options on mount, and again on "Retry" if Lusha was down.
+  const [optionsFailed, setOptionsFailed] = useState(false);
+  const loadFilterOptions = useCallback(() => {
+    setOptionsFailed(false);
     (async () => {
       try {
         const actions = [
@@ -204,47 +183,50 @@ export function LushaSearch({
             departments: opts.departments ?? [],
             seniorities: opts.seniority ?? [],
           });
+        } else {
+          setOptionsFailed(true);
         }
       } catch {
-        // Non-fatal
+        setOptionsFailed(true);
       }
     })();
   }, []);
+  useEffect(loadFilterOptions, [loadFilterOptions]);
 
-  const autocomplete = useCallback(
-    async (
-      action: string,
-      query: string,
-      setter: (v: LushaFilterOption[]) => void,
-    ) => {
-      if (query.length < 2) {
-        setter([]);
-        return;
-      }
+
+
+  // Autocomplete lookups. Each returns the options to offer for a query;
+  // the fields themselves own their text, debouncing and selection.
+  const lookup = useCallback(
+    async (action: string, query: string): Promise<LushaFilterOption[]> => {
       try {
         const { data, error } = await supabase.functions.invoke("lusha-proxy", {
           body: { action, query },
         });
-        if (!error && data?.results) setter(data.results);
+        return !error && data?.results ? data.results : [];
       } catch {
-        // silent
+        return [];
       }
     },
     [],
   );
 
-  // Below 2 characters Lusha's own search-by-text endpoints return nothing,
-  // so short queries (including empty, on focus/click) are served from a
-  // small curated starter list instead — filtered client-side as you type,
-  // then handed off to the live debounced Lusha search once you hit 2+
-  // characters. Keeps these fields feeling like a real dropdown you can
-  // click open, rather than one that stays empty until you start typing.
-  const seedOrFilter = (defaults: LushaFilterOption[], query: string) =>
-    query
-      ? defaults.filter((o) =>
-          o.name.toLowerCase().includes(query.toLowerCase()),
-        )
-      : defaults;
+  // Lusha's location filter matches by country only, so a suggestion like
+  // "Cairo, Egypt" used to search all of Egypt while reading as Cairo.
+  // Offer countries, and only countries — what you pick is what's searched.
+  const lookupCountries = useCallback(
+    async (action: string, query: string): Promise<LushaFilterOption[]> => {
+      const q = query.toLowerCase();
+      const names = DEFAULT_LOCATIONS.filter((o) =>
+        o.name.toLowerCase().includes(q),
+      ).map((o) => o.name);
+      for (const o of await lookup(action, query)) {
+        if (o.id && !names.includes(o.id)) names.push(o.id);
+      }
+      return names.map((name) => ({ id: name, name }));
+    },
+    [lookup],
+  );
 
   const handleSearch = async () => {
     if (
@@ -547,56 +529,174 @@ export function LushaSearch({
     );
   }
 
+  const loadingNote = (what: string) =>
+    optionsFailed ? (
+      <p className="flex h-9 items-center text-xs text-muted-foreground">
+        Couldn't load {what} from Lusha.&nbsp;
+        <button
+          type="button"
+          className="font-medium text-primary hover:underline"
+          onClick={loadFilterOptions}
+        >
+          Retry
+        </button>
+      </p>
+    ) : (
+      <p className="flex h-9 items-center gap-2 text-xs text-muted-foreground">
+        <Spinner /> Loading {what}...
+      </p>
+    );
+
   return (
     <div className="space-y-5">
+      <FormSection icon={<Users className="h-4 w-4 text-primary" />} title="Who">
+        <ComboField
+          label="Job Titles"
+          icon={<Briefcase className="h-4 w-4" />}
+          tooltip="Pick from the list, or type any title and press Enter. Results match ANY of them."
+          placeholder="e.g. Sales Manager — pick or press Enter"
+          multiple
+          freeText
+          values={filters.job_titles ?? []}
+          onChange={(next) => setFilters((f) => ({ ...f, job_titles: next }))}
+          seeds={DEFAULT_JOB_TITLES}
+          search={(q) => lookup("autocomplete-job-titles", q)}
+        />
+
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+          <div className="space-y-1.5">
+            <div className="flex items-center gap-1.5">
+              <Label>Department</Label>
+              <InfoTooltip text="Select one or more departments. Results include contacts from ANY of them." />
+            </div>
+            {!filterOptions?.departments?.length ? (
+              loadingNote("departments")
+            ) : (
+              <MultiSelectDropdown
+                icon={<Layers className="h-4 w-4 text-muted-foreground" />}
+                options={filterOptions.departments}
+                selected={filters.departments ?? []}
+                onChange={(next) =>
+                  setFilters((f) => ({ ...f, departments: next }))
+                }
+                placeholder="Any department"
+              />
+            )}
+          </div>
+
+          <div className="space-y-1.5">
+            <div className="flex items-center gap-1.5">
+              <Label>Seniority</Label>
+              <InfoTooltip text="Select one or more seniority levels. Results include ANY of the selected levels." />
+            </div>
+            {!filterOptions?.seniorities?.length ? (
+              loadingNote("seniority levels")
+            ) : (
+              <MultiSelectDropdown
+                icon={<TrendingUp className="h-4 w-4 text-muted-foreground" />}
+                options={filterOptions.seniorities}
+                selected={filters.seniorities ?? []}
+                onChange={(next) =>
+                  setFilters((f) => ({ ...f, seniorities: next }))
+                }
+                placeholder="Any seniority"
+              />
+            )}
+          </div>
+        </div>
+
+        <ComboField
+          label="Contact Country"
+          icon={<MapPin className="h-4 w-4" />}
+          tooltip="Where the person is based. This is the filter that keeps results inside one country."
+          placeholder="Click to pick a country..."
+          values={filters.contact_location ? [filters.contact_location] : []}
+          onChange={(next) =>
+            setFilters((f) => ({ ...f, contact_location: next[0] ?? "" }))
+          }
+          seeds={DEFAULT_LOCATIONS}
+          search={(q) => lookupCountries("autocomplete-contact-locations", q)}
+        />
+
+        <ComboField
+          label="Person Name"
+          icon={<User className="h-4 w-4" />}
+          tooltip="Looking for someone specific? Type their name and press Enter. Pair it with a company name for the best chance of a single, exact match."
+          placeholder="e.g. Omar Essam — press Enter to add"
+          multiple
+          freeText
+          values={filters.contact_names ?? []}
+          onChange={(next) => setFilters((f) => ({ ...f, contact_names: next }))}
+        />
+      </FormSection>
+
       <FormSection
         icon={<Building2 className="h-4 w-4 text-primary" />}
         title="Company"
       >
-        {/* Company Name Autocomplete */}
-        <AutocompleteField
+        <ComboField
           label="Company Name"
           icon={<Building2 className="h-4 w-4" />}
-          value={companyQuery}
-          onChange={(v) => {
-            setCompanyQuery(v);
-            setFilters((f) => ({ ...f, company_name: v }));
-            clearTimeout(companyTimeout.current);
-            companyTimeout.current = setTimeout(
-              () =>
-                autocomplete("autocomplete-companies", v, setCompanySuggestions),
-              300,
-            );
-          }}
-          suggestions={companySuggestions}
-          onSelect={(s) => {
-            setCompanyQuery(s.name);
-            setCompanySuggestions([]);
-            setFilters((f) => ({ ...f, company_name: s.name }));
-          }}
           placeholder="Search company name..."
+          freeText
+          values={filters.company_name ? [filters.company_name] : []}
+          onChange={(next) =>
+            setFilters((f) => ({ ...f, company_name: next[0] ?? "" }))
+          }
+          search={(q) => lookup("autocomplete-companies", q)}
+        />
+
+        <ComboField
+          label="Company HQ Country"
+          icon={<MapPin className="h-4 w-4" />}
+          tooltip="Where the company is headquartered. Its staff can be anywhere — to get people in a country, use Contact Country."
+          placeholder="Click to pick a country..."
+          values={filters.location ? [filters.location] : []}
+          onChange={(next) =>
+            setFilters((f) => ({ ...f, location: next[0] ?? "" }))
+          }
+          seeds={DEFAULT_LOCATIONS}
+          search={(q) => lookupCountries("autocomplete-locations", q)}
+          hint={
+            filters.location &&
+            filters.contact_location !== filters.location && (
+              <p className="text-xs text-amber-600">
+                {filters.contact_location
+                  ? `Contacts are filtered to ${filters.contact_location}, companies to ${filters.location}.`
+                  : "This only filters where companies are based — their people can be in other countries."}{" "}
+                <button
+                  type="button"
+                  className="font-medium text-primary hover:underline"
+                  onClick={() =>
+                    setFilters((f) => ({ ...f, contact_location: f.location }))
+                  }
+                >
+                  Only people in {filters.location}
+                </button>
+              </p>
+            )
+          }
         />
 
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-          {/* Industry */}
           <div className="space-y-1.5">
             <Label>Industry</Label>
-            <Select
-              value={filters.industry ?? ""}
-              onChange={(e) =>
-                setFilters((f) => ({ ...f, industry: e.target.value }))
-              }
-            >
-              <option value="">Any industry</option>
-              {(filterOptions?.industries ?? []).map((o) => (
-                <option key={o.id} value={o.id}>
-                  {o.name} {o.count != null ? `(${o.count})` : ""}
-                </option>
-              ))}
-            </Select>
+            {!filterOptions?.industries?.length ? (
+              loadingNote("industries")
+            ) : (
+              <MultiSelectDropdown
+                single
+                icon={<Building2 className="h-4 w-4 text-muted-foreground" />}
+                options={filterOptions.industries}
+                selected={filters.industry ? [filters.industry] : []}
+                onChange={(next) =>
+                  setFilters((f) => ({ ...f, industry: next[0] ?? "" }))
+                }
+                placeholder="Any industry"
+              />
+            )}
           </div>
 
-          {/* Revenue */}
           <div className="space-y-1.5">
             <Label>Revenue</Label>
             <Select
@@ -615,14 +715,13 @@ export function LushaSearch({
           </div>
         </div>
 
-        {/* Company Size */}
         <div className="space-y-1.5">
           <div className="flex items-center gap-1.5">
             <Label>Company Size</Label>
             <InfoTooltip text="Select one or more employee-count ranges. Results match ANY of the selected ranges." />
           </div>
           {!filterOptions?.companySizes?.length ? (
-            <p className="text-xs text-muted-foreground">Loading sizes...</p>
+            loadingNote("sizes")
           ) : (
             <MultiSelectDropdown
               icon={<Users className="h-4 w-4 text-muted-foreground" />}
@@ -636,407 +735,22 @@ export function LushaSearch({
           )}
         </div>
 
-        {/* Location Autocomplete */}
-        <AutocompleteField
-          label="Location"
-          icon={<MapPin className="h-4 w-4" />}
-          value={locationQuery}
-          onFocus={() =>
-            locationQuery.length < 2 &&
-            setLocationSuggestions(seedOrFilter(DEFAULT_LOCATIONS, locationQuery))
-          }
-          onChange={(v) => {
-            setLocationQuery(v);
-            clearTimeout(locationTimeout.current);
-            if (v.length < 2) {
-              setLocationSuggestions(seedOrFilter(DEFAULT_LOCATIONS, v));
-              return;
-            }
-            locationTimeout.current = setTimeout(
-              () =>
-                autocomplete("autocomplete-locations", v, setLocationSuggestions),
-              300,
-            );
-          }}
-          suggestions={locationSuggestions}
-          onSelect={(s) => {
-            setLocationQuery(s.name);
-            setLocationSuggestions([]);
-            setFilters((f) => ({ ...f, location: s.id }));
-          }}
-          placeholder="Click to browse or search location..."
+        <ComboField
+          label="Technologies"
+          icon={<Cpu className="h-4 w-4" />}
+          placeholder="Click to browse or search technologies..."
+          multiple
+          values={filters.technologies ?? []}
+          onChange={(next) => setFilters((f) => ({ ...f, technologies: next }))}
+          seeds={DEFAULT_TECHNOLOGIES}
+          search={(q) => lookup("autocomplete-technologies", q)}
         />
-
-        {/* Technologies Autocomplete */}
-        <div className="space-y-1.5">
-          <Label>Technologies</Label>
-          <div className="flex flex-wrap gap-1.5">
-            {(filters.technologies ?? []).map((t, i) => (
-              <span
-                key={i}
-                className="inline-flex items-center gap-1 rounded-full bg-primary/10 px-2.5 py-0.5 text-xs font-medium text-primary"
-              >
-                <Cpu className="h-3 w-3" />
-                {t}
-                <button
-                  type="button"
-                  onClick={() =>
-                    setFilters((f) => ({ ...f, technologies: (f.technologies ?? []).filter( (_, j) => j !== i, ) }))
-                  }
-                >
-                  <X className="h-3 w-3" />
-                </button>
-              </span>
-            ))}
-          </div>
-          <div className="relative">
-            <Input
-              value={techQuery}
-              onFocus={() =>
-                techQuery.length < 2 &&
-                setTechSuggestions(seedOrFilter(DEFAULT_TECHNOLOGIES, techQuery))
-              }
-              onChange={(e) => {
-                const v = e.target.value;
-                setTechQuery(v);
-                clearTimeout(techTimeout.current);
-                if (v.length < 2) {
-                  setTechSuggestions(seedOrFilter(DEFAULT_TECHNOLOGIES, v));
-                  return;
-                }
-                techTimeout.current = setTimeout(
-                  () =>
-                    autocomplete(
-                      "autocomplete-technologies",
-                      v,
-                      setTechSuggestions,
-                    ),
-                  300,
-                );
-              }}
-              onBlur={() => setTimeout(() => setTechSuggestions([]), 200)}
-              placeholder="Click to browse or search technologies..."
-              onKeyDown={(e) => {
-                if (e.key === "Enter" && techSuggestions.length > 0) {
-                  e.preventDefault();
-                  const s = techSuggestions[0];
-                  const current = filters.technologies ?? [];
-                  if (!current.includes(s.name)) {
-                    setFilters((f) => ({ ...f, technologies: [ ...(f.technologies ?? []), s.name, ] }));
-                  }
-                  setTechQuery("");
-                  setTechSuggestions([]);
-                }
-              }}
-            />
-            {techSuggestions.length > 0 && (
-              <div className="absolute z-10 mt-1 max-h-40 w-full overflow-auto rounded-md border border-border bg-popover shadow-lg">
-                {techSuggestions.map((s, i) => (
-                  <button
-                    key={i}
-                    type="button"
-                    className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm hover:bg-muted"
-                    onClick={() => {
-                      const current = filters.technologies ?? [];
-                      if (!current.includes(s.name)) {
-                        setFilters((f) => ({ ...f, technologies: [ ...(f.technologies ?? []), s.name, ] }));
-                      }
-                      setTechQuery("");
-                      setTechSuggestions([]);
-                    }}
-                  >
-                    {s.name}
-                  </button>
-                ))}
-              </div>
-            )}
-          </div>
-        </div>
-      </FormSection>
-
-      <FormSection icon={<Users className="h-4 w-4 text-primary" />} title="Contact">
-        {/* Person Name Tags — for hunting one specific person rather
-            than a segment. Lusha has no autocomplete for names, so this
-            is plain text: type a name, press Enter. */}
-        <div className="space-y-1.5">
-          <div className="flex items-center gap-1.5">
-            <Label>Person Name</Label>
-            <InfoTooltip text="Looking for someone specific? Type their name and press Enter. Pair it with a company name for the best chance of a single, exact match." />
-          </div>
-          <div className="flex flex-wrap gap-1.5">
-            {(filters.contact_names ?? []).map((n, i) => (
-              <span
-                key={i}
-                className="inline-flex items-center gap-1 rounded-full bg-accent px-2.5 py-0.5 text-xs font-medium text-accent-foreground"
-              >
-                <User className="h-3 w-3" />
-                {n}
-                <button
-                  type="button"
-                  onClick={() =>
-                    setFilters((f) => ({
-                      ...f,
-                      contact_names: (f.contact_names ?? []).filter((_, j) => j !== i),
-                    }))
-                  }
-                >
-                  <X className="h-3 w-3" />
-                </button>
-              </span>
-            ))}
-          </div>
-          <Input
-            value={nameInput}
-            onChange={(e) => setNameInput(e.target.value)}
-            placeholder="e.g. Omar Essam — press Enter to add"
-            onKeyDown={(e) => {
-              if (e.key !== "Enter") return;
-              e.preventDefault();
-              const typed = nameInput.trim();
-              if (!typed) return;
-              setFilters((f) => ({
-                ...f,
-                contact_names: (f.contact_names ?? []).includes(typed)
-                  ? f.contact_names
-                  : [...(f.contact_names ?? []), typed],
-              }));
-              setNameInput("");
-            }}
-          />
-        </div>
-
-        {/* Job Titles Tags */}
-        <div className="space-y-1.5">
-          <Label>Job Titles</Label>
-          <div className="flex flex-wrap gap-1.5">
-            {(filters.job_titles ?? []).map((t, i) => (
-              <span
-                key={i}
-                className="inline-flex items-center gap-1 rounded-full bg-accent px-2.5 py-0.5 text-xs font-medium text-accent-foreground"
-              >
-                <Briefcase className="h-3 w-3" />
-                {t}
-                <button
-                  type="button"
-                  onClick={() =>
-                    setFilters((f) => ({ ...f, job_titles: (f.job_titles ?? []).filter( (_, j) => j !== i, ) }))
-                  }
-                >
-                  <X className="h-3 w-3" />
-                </button>
-              </span>
-            ))}
-          </div>
-          <div className="relative">
-            <Input
-              value={jobTitleInput}
-              onFocus={() =>
-                jobTitleInput.length < 2 &&
-                setJobTitleSuggestions(
-                  seedOrFilter(DEFAULT_JOB_TITLES, jobTitleInput),
-                )
-              }
-              onChange={(e) => {
-                const v = e.target.value;
-                setJobTitleInput(v);
-                clearTimeout(jobTitleTimeout.current);
-                if (v.length < 2) {
-                  setJobTitleSuggestions(seedOrFilter(DEFAULT_JOB_TITLES, v));
-                  return;
-                }
-                jobTitleTimeout.current = setTimeout(
-                  () =>
-                    autocomplete(
-                      "autocomplete-job-titles",
-                      v,
-                      setJobTitleSuggestions,
-                    ),
-                  300,
-                );
-              }}
-              onBlur={() => setTimeout(() => setJobTitleSuggestions([]), 200)}
-              placeholder="Click to browse or search job titles..."
-              onKeyDown={(e) => {
-                const typed = jobTitleInput.trim();
-                if (e.key === "Enter" && (typed || jobTitleSuggestions.length > 0)) {
-                  e.preventDefault();
-                  // Enter used to add Lusha's first suggestion, which is often
-                  // not what was typed ("general manager" → "General IT
-                  // Manager"). Prefer an exact match, then the typed text
-                  // itself; fall back to the first suggestion only when
-                  // nothing was typed.
-                  const exact = jobTitleSuggestions.find(
-                    (o) => o.name.toLowerCase() === typed.toLowerCase(),
-                  );
-                  const title = exact?.name ?? (typed || jobTitleSuggestions[0]?.name);
-                  const current = filters.job_titles ?? [];
-                  if (title && !current.includes(title)) {
-                    setFilters((f) => ({ ...f, job_titles: [...(f.job_titles ?? []), title] }));
-                  }
-                  setJobTitleInput("");
-                  setJobTitleSuggestions([]);
-                }
-              }}
-            />
-            {jobTitleSuggestions.length > 0 && (
-              <div className="absolute z-10 mt-1 max-h-40 w-full overflow-auto rounded-md border border-border bg-popover shadow-lg">
-                {jobTitleSuggestions.map((s, i) => (
-                  <button
-                    key={i}
-                    type="button"
-                    className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm hover:bg-muted"
-                    onClick={() => {
-                      const current = filters.job_titles ?? [];
-                      if (!current.includes(s.name)) {
-                        setFilters((f) => ({ ...f, job_titles: [ ...(f.job_titles ?? []), s.name, ] }));
-                      }
-                      setJobTitleInput("");
-                      setJobTitleSuggestions([]);
-                    }}
-                  >
-                    {s.name}
-                  </button>
-                ))}
-              </div>
-            )}
-          </div>
-        </div>
-
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-          {/* Department */}
-          <div className="space-y-1.5">
-            <div className="flex items-center gap-1.5">
-              <Label>Department</Label>
-              <InfoTooltip text="Select one or more departments. Results include contacts from ANY of them." />
-            </div>
-            {!filterOptions?.departments?.length ? (
-              <p className="text-xs text-muted-foreground">
-                Loading departments...
-              </p>
-            ) : (
-              <MultiSelectDropdown
-                icon={<Layers className="h-4 w-4 text-muted-foreground" />}
-                options={filterOptions.departments}
-                selected={filters.departments ?? []}
-                onChange={(next) =>
-                  setFilters((f) => ({ ...f, departments: next }))
-                }
-                placeholder="Any department"
-              />
-            )}
-          </div>
-
-          {/* Contact Location */}
-          <AutocompleteField
-            label="Contact Location"
-            icon={<MapPin className="h-4 w-4" />}
-            value={contactLocationQuery}
-            onFocus={() =>
-              contactLocationQuery.length < 2 &&
-              setContactLocationSuggestions(
-                seedOrFilter(DEFAULT_LOCATIONS, contactLocationQuery),
-              )
-            }
-            onChange={(v) => {
-              setContactLocationQuery(v);
-              clearTimeout(contactLocationTimeout.current);
-              if (v.length < 2) {
-                setContactLocationSuggestions(seedOrFilter(DEFAULT_LOCATIONS, v));
-                return;
-              }
-              contactLocationTimeout.current = setTimeout(
-                () =>
-                  autocomplete(
-                    "autocomplete-contact-locations",
-                    v,
-                    setContactLocationSuggestions,
-                  ),
-                300,
-              );
-            }}
-            suggestions={contactLocationSuggestions}
-            onSelect={(s) => {
-              setContactLocationQuery(s.name);
-              setContactLocationSuggestions([]);
-              setFilters((f) => ({ ...f, contact_location: s.id }));
-            }}
-            placeholder="Click to browse or search location..."
-          />
-        </div>
-
-        {/* Seniority */}
-        <div className="space-y-1.5">
-          <div className="flex items-center gap-1.5">
-            <Label>Seniority</Label>
-            <InfoTooltip text="Select one or more seniority levels. Results include ANY of the selected levels." />
-          </div>
-          {!filterOptions?.seniorities?.length ? (
-            <p className="text-xs text-muted-foreground">
-              Loading seniority levels...
-            </p>
-          ) : (
-            <MultiSelectDropdown
-              icon={<TrendingUp className="h-4 w-4 text-muted-foreground" />}
-              options={filterOptions.seniorities}
-              selected={filters.seniorities ?? []}
-              onChange={(next) =>
-                setFilters((f) => ({ ...f, seniorities: next }))
-              }
-              placeholder="Any seniority"
-            />
-          )}
-        </div>
       </FormSection>
 
       <FormSection
         icon={<SlidersHorizontal className="h-4 w-4 text-primary" />}
         title="Search Settings"
       >
-        {/* Data Points Checkboxes */}
-        <div className="space-y-1.5">
-          <div className="flex items-center gap-1.5">
-            <Label>Data Points to Include</Label>
-            <InfoTooltip text="Choose which fields to include for each returned lead." />
-          </div>
-          <div className="flex flex-wrap gap-3">
-            {[
-              { id: "email", name: "Email" },
-              { id: "phone", name: "Phone" },
-              { id: "company", name: "Company" },
-              { id: "job_title", name: "Job Title" },
-              { id: "location", name: "Location" },
-              { id: "industry", name: "Industry" },
-              { id: "linkedin_url", name: "LinkedIn URL" },
-            ].map((dp) => {
-              const checked = filters.data_points?.includes(dp.id) ?? true;
-              return (
-                <label key={dp.id} className="flex items-center gap-1.5 text-sm">
-                  <Checkbox
-                    checked={checked}
-                    onCheckedChange={() => {
-                      const current = filters.data_points ?? [
-                        "email",
-                        "phone",
-                        "company",
-                        "job_title",
-                        "location",
-                        "industry",
-                        "linkedin_url",
-                      ];
-                      const next = checked
-                        ? current.filter((id) => id !== dp.id)
-                        : [...current, dp.id];
-                      setFilters((f) => ({ ...f, data_points: next }));
-                    }}
-                  />
-                  {dp.name}
-                </label>
-              );
-            })}
-          </div>
-        </div>
-
-        {/* Max Leads */}
         <div className="space-y-1.5">
           <Label htmlFor="max-leads">Max Leads</Label>
           <Input
@@ -1057,7 +771,16 @@ export function LushaSearch({
         </div>
       </FormSection>
 
-      <div className="flex justify-end">
+      <div className="flex items-center justify-between gap-3">
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={() =>
+            setFilters((f) => ({ ...DEFAULT_LUSHA_FILTERS, max_leads: f.max_leads }))
+          }
+        >
+          Clear all filters
+        </Button>
         <Button onClick={handleSearch} disabled={searching} size="lg">
           {searching ? <Spinner /> : <Search className="h-4 w-4" />}
           Search Leads
@@ -1090,30 +813,113 @@ function FormSection({
   );
 }
 
-// ─── Autocomplete Field ───────────────────────────────────────────────────────
+// ─── Combo Field ──────────────────────────────────────────────────────────────
 
-function AutocompleteField({
+/**
+ * A text box with a pick list: click to browse, type to search, arrows +
+ * Enter or a click to pick. What's applied shows as chips (one chip, for a
+ * single-value field), so it's never unclear whether a filter is on.
+ *
+ * The list keeps focus in the input while it's clicked — the old fields
+ * closed their list 200ms after blur, so any slower click missed. Text
+ * that was typed but never picked is applied on blur when it matches an
+ * option exactly (or always, for free-text fields), and is flagged
+ * otherwise instead of being silently left out of the search.
+ */
+function ComboField({
   label,
   icon,
-  value,
-  onChange,
-  onFocus,
-  suggestions,
-  onSelect,
-  placeholder,
   tooltip,
+  placeholder,
+  values,
+  onChange,
+  multiple = false,
+  freeText = false,
+  seeds = [],
+  search,
+  hint,
 }: {
   label: string;
-  icon: React.ReactNode;
-  value: string;
-  onChange: (v: string) => void;
-  onFocus?: () => void;
-  suggestions: LushaFilterOption[];
-  onSelect: (s: LushaFilterOption) => void;
-  placeholder?: string;
+  icon: ReactNode;
   tooltip?: string;
+  placeholder: string;
+  values: string[];
+  onChange: (next: string[]) => void;
+  multiple?: boolean;
+  /** Typed text is a valid value on its own (titles, names, companies). */
+  freeText?: boolean;
+  /** Shown instantly, before 2 characters are typed for a live lookup. */
+  seeds?: LushaFilterOption[];
+  search?: (query: string) => Promise<LushaFilterOption[]>;
+  hint?: ReactNode;
 }) {
+  const [query, setQuery] = useState("");
+  const [suggestions, setSuggestions] = useState<LushaFilterOption[]>([]);
   const [open, setOpen] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [active, setActive] = useState(-1);
+  const timer = useRef<ReturnType<typeof setTimeout>>();
+  const latest = useRef("");
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => () => clearTimeout(timer.current), []);
+
+  const seedsFor = (q: string) =>
+    q
+      ? seeds.filter((o) => o.name.toLowerCase().includes(q.toLowerCase()))
+      : seeds;
+
+  const refresh = (q: string) => {
+    latest.current = q;
+    clearTimeout(timer.current);
+    setActive(freeText ? -1 : 0);
+    setSuggestions(seedsFor(q));
+    if (!search || q.trim().length < 2) {
+      setLoading(false);
+      return;
+    }
+    setLoading(true);
+    timer.current = setTimeout(async () => {
+      const found = await search(q.trim());
+      if (latest.current !== q) return;
+      if (found.length) setSuggestions(found);
+      setLoading(false);
+    }, 300);
+  };
+
+  const add = (name: string) => {
+    const v = name.trim();
+    if (!v) return;
+    onChange(multiple ? (values.includes(v) ? values : [...values, v]) : [v]);
+    setQuery("");
+    latest.current = "";
+    clearTimeout(timer.current);
+    setLoading(false);
+    setSuggestions([]);
+    setOpen(false);
+  };
+
+  const remove = (v: string) => onChange(values.filter((x) => x !== v));
+
+  const shown = suggestions.filter((o) => !values.includes(o.name));
+
+  const exactMatch = (q: string) =>
+    [...suggestions, ...seeds].find(
+      (o) => o.name.toLowerCase() === q.trim().toLowerCase(),
+    );
+
+  // Typed text the user didn't pick from the list.
+  const commitTyped = () => {
+    const q = query.trim();
+    if (!q) return;
+    const exact = exactMatch(q);
+    if (exact) add(exact.name);
+    else if (freeText) add(q);
+  };
+
+  const pending = !open && query.trim() !== "" && !freeText;
+  const singleApplied = !multiple && values.length > 0;
+  const offerTyped = freeText && query.trim() !== "" && !exactMatch(query);
 
   return (
     <div className="space-y-1.5">
@@ -1121,48 +927,157 @@ function AutocompleteField({
         <Label>{label}</Label>
         {tooltip && <InfoTooltip text={tooltip} />}
       </div>
-      <div className="relative">
-        <div className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground">
-          {icon}
-        </div>
-        <Input
-          value={value}
-          onChange={(e) => {
-            onChange(e.target.value);
-            setOpen(true);
-          }}
-          onFocus={() => {
-            onFocus?.();
-            setOpen(true);
-          }}
-          onBlur={() => setTimeout(() => setOpen(false), 200)}
-          placeholder={placeholder}
-          className="pl-9"
-        />
-        {open && suggestions.length > 0 && (
-          <div className="absolute z-10 mt-1 max-h-48 w-full overflow-auto rounded-md border border-border bg-popover shadow-lg">
-            {suggestions.map((s, i) => (
+
+      {multiple && values.length > 0 && (
+        <div className="flex flex-wrap gap-1.5">
+          {values.map((v) => (
+            <span
+              key={v}
+              className="inline-flex items-center gap-1 rounded-full bg-primary/10 px-2.5 py-0.5 text-xs font-medium text-primary [&_svg]:h-3 [&_svg]:w-3"
+            >
+              {icon}
+              {v}
               <button
-                key={i}
                 type="button"
-                className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm hover:bg-muted"
-                onClick={() => {
-                  onSelect(s);
-                  setOpen(false);
-                }}
+                aria-label={`Remove ${v}`}
+                className="rounded-full hover:bg-primary/20"
+                onClick={() => remove(v)}
               >
-                {icon}
-                <span>{s.name}</span>
-                {s.count != null && (
-                  <span className="ml-auto text-xs text-muted-foreground">
-                    {s.count}
-                  </span>
-                )}
+                <X />
               </button>
-            ))}
+            </span>
+          ))}
+        </div>
+      )}
+
+      {singleApplied ? (
+        <div className="flex h-9 items-center gap-2 rounded-md border border-primary/40 bg-primary/5 px-3 text-sm">
+          <span className="text-primary">{icon}</span>
+          <span className="flex-1 truncate font-medium">{values[0]}</span>
+          <button
+            type="button"
+            aria-label={`Clear ${label}`}
+            className="rounded p-0.5 text-muted-foreground hover:bg-muted hover:text-foreground"
+            onClick={() => {
+              onChange([]);
+              setTimeout(() => inputRef.current?.focus(), 0);
+            }}
+          >
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+      ) : (
+        <div className="relative">
+          <div className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground">
+            {icon}
           </div>
-        )}
-      </div>
+          <Input
+            ref={inputRef}
+            value={query}
+            placeholder={placeholder}
+            className={cn("pl-9", pending && "border-amber-500")}
+            onFocus={() => {
+              refresh(query);
+              setOpen(true);
+            }}
+            onChange={(e) => {
+              setQuery(e.target.value);
+              refresh(e.target.value);
+              setOpen(true);
+            }}
+            onBlur={() => {
+              setOpen(false);
+              commitTyped();
+            }}
+            onKeyDown={(e) => {
+              if (e.key === "ArrowDown") {
+                e.preventDefault();
+                setOpen(true);
+                setActive((i) => Math.min(i + 1, shown.length - 1));
+              } else if (e.key === "ArrowUp") {
+                e.preventDefault();
+                setActive((i) => Math.max(i - 1, freeText ? -1 : 0));
+              } else if (e.key === "Enter") {
+                e.preventDefault();
+                if (open && shown[active]) add(shown[active].name);
+                else commitTyped();
+              } else if (e.key === "Escape") {
+                setOpen(false);
+              } else if (
+                e.key === "Backspace" &&
+                !query &&
+                multiple &&
+                values.length > 0
+              ) {
+                remove(values[values.length - 1]);
+              }
+            }}
+          />
+          {open && (shown.length > 0 || loading || offerTyped || query.trim().length >= 2) && (
+            <div
+              className="absolute z-20 mt-1 max-h-56 w-full overflow-auto rounded-md border border-border bg-popover py-1 shadow-lg"
+              // Keeps focus in the input, so a click never races its blur.
+              onMouseDown={(e) => e.preventDefault()}
+            >
+              {offerTyped && (
+                <button
+                  type="button"
+                  className={cn(
+                    "flex w-full items-center gap-2 px-3 py-2 text-left text-sm hover:bg-muted",
+                    active === -1 && "bg-muted",
+                  )}
+                  onMouseEnter={() => setActive(-1)}
+                  onClick={() => add(query)}
+                >
+                  <span>
+                    Use "<span className="font-medium">{query.trim()}</span>"
+                  </span>
+                  <span className="ml-auto text-xs text-muted-foreground">Enter</span>
+                </button>
+              )}
+              {shown.map((s, i) => (
+                <button
+                  key={`${s.id}-${i}`}
+                  type="button"
+                  className={cn(
+                    "flex w-full items-center gap-2 px-3 py-2 text-left text-sm hover:bg-muted",
+                    i === active && "bg-muted",
+                  )}
+                  onMouseEnter={() => setActive(i)}
+                  onClick={() => add(s.name)}
+                >
+                  <span className="text-muted-foreground">{icon}</span>
+                  <span className="truncate">{s.name}</span>
+                  {s.count != null && (
+                    <span className="ml-auto text-xs text-muted-foreground">
+                      {s.count}
+                    </span>
+                  )}
+                </button>
+              ))}
+              {loading ? (
+                <p className="flex items-center gap-2 px-3 py-2 text-xs text-muted-foreground">
+                  <Spinner /> Searching Lusha...
+                </p>
+              ) : (
+                shown.length === 0 &&
+                !offerTyped && (
+                  <p className="px-3 py-2 text-xs text-muted-foreground">
+                    No matches for "{query.trim()}"
+                  </p>
+                )
+              )}
+            </div>
+          )}
+        </div>
+      )}
+
+      {pending && (
+        <p className="text-xs text-amber-600">
+          "{query.trim()}" isn't applied — pick one from the list.
+        </p>
+      )}
+      {hint}
     </div>
   );
 }
