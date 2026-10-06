@@ -8,7 +8,7 @@ Open the Supabase dashboard → **SQL Editor** → New query → paste each file
 
 1. `migrations/0001_initial_schema.sql` — creates all tables and indexes
 2. `migrations/0002_rls_policies.sql` — enables RLS and adds org-scoped policies
-3. …through `migrations/0031_sequence_departments.sql` (0019 creates the public `email-media` storage bucket; 0020 gives sender accounts an owner; 0030 gives leads an owner so a lead with no campaign is still visible to whoever found it; 0031 lets a sequence target whole departments)
+3. …through `migrations/0032_shared_sequence_library_repair.sql` (0019 creates the public `email-media` storage bucket; 0020 gives sender accounts an owner; 0030 gives leads an owner so a lead with no campaign is still visible to whoever found it; 0031 lets a sequence target whole departments; 0032 resets the sequence library to readable and editable by the whole team, whatever policies the live database had)
 
 Run each file **once**, in order. They are individually idempotent, but
 re-running an **earlier** file after later ones is not safe: 0002 creates
