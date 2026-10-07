@@ -47,6 +47,7 @@ import {
 } from "recharts";
 
 import { supabase } from "@/lib/supabase";
+import { useThread } from "@/lib/inbox";
 import { departmentName } from "@/lib/job-match";
 import { useAuth } from "@/hooks/use-auth";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -830,6 +831,8 @@ function LeadSlideOver({ lead, onClose }: { lead: Lead; onClose: () => void }) {
             </div>
           </div>
 
+          <SentEmails lead={lead} />
+
           {/* Reply Text */}
           {lead.reply_text && (
             <div className="space-y-2">
@@ -857,6 +860,65 @@ function LeadSlideOver({ lead, onClose }: { lead: Lead; onClose: () => void }) {
           </div>
         </div>
       </div>
+    </div>
+  );
+}
+
+// The emails themselves, as SmartLead sent them. A Titan (or any plain
+// SMTP) mailbox never files SmartLead's sends in its own Sent folder —
+// only Google and Microsoft do that server-side — so this is where a
+// sent campaign email can actually be read.
+function SentEmails({ lead }: { lead: Lead }) {
+  const started = !!(lead.email_delivered || (lead.current_step ?? 0) > 0 || lead.replied_at);
+  const { data: messages = [], isLoading, error, refetch, isFetching } = useThread(
+    started ? lead.id : null,
+  );
+  const name = (lead.full_name ?? `${lead.first_name ?? ""} ${lead.last_name ?? ""}`.trim()) || "Lead";
+
+  return (
+    <div className="space-y-3">
+      <div className="flex items-center justify-between">
+        <h4 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+          Emails
+        </h4>
+        {started && (
+          <Button variant="ghost" size="icon" onClick={() => refetch()} aria-label="Refresh emails">
+            <RefreshCw className={cn("h-3.5 w-3.5", isFetching && "animate-spin")} />
+          </Button>
+        )}
+      </div>
+      {!started ? (
+        <p className="text-sm text-muted-foreground">Nothing sent to this lead yet.</p>
+      ) : isLoading ? (
+        <p className="flex items-center gap-2 text-sm text-muted-foreground">
+          <Spinner /> Loading the emails from SmartLead…
+        </p>
+      ) : error ? (
+        <p className="rounded-md border border-destructive/30 bg-destructive/5 p-3 text-sm text-destructive">
+          {(error as Error).message}
+        </p>
+      ) : messages.length === 0 ? (
+        <p className="text-sm text-muted-foreground">
+          SmartLead hasn't recorded an email to this lead yet — check back in a few minutes.
+        </p>
+      ) : (
+        messages.map((m, i) => (
+          <div
+            key={i}
+            className={cn(
+              "rounded-lg p-3 text-sm",
+              m.type === "sent" ? "bg-primary/10" : "border border-border bg-muted/40",
+            )}
+          >
+            <div className="mb-1 flex flex-wrap items-center gap-x-2 text-[11px] text-muted-foreground">
+              <span className="font-medium">{m.type === "sent" ? "You" : name}</span>
+              {m.time && <span>{format(new Date(m.time), "MMM d, yyyy HH:mm")}</span>}
+            </div>
+            {m.subject && <p className="mb-1 font-medium">{m.subject}</p>}
+            <p className="whitespace-pre-wrap break-words">{m.text || "(empty message)"}</p>
+          </div>
+        ))
+      )}
     </div>
   );
 }
