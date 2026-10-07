@@ -18,6 +18,7 @@ import {
   ChevronDown,
   ChevronUp,
   AlertTriangle,
+  X,
 } from "lucide-react";
 import { toast } from "sonner";
 import { useQueryClient } from "@tanstack/react-query";
@@ -232,6 +233,9 @@ export function StepSequences({
         defaultVerticalKey={defaultVerticalKey}
         onSelect={(key) => setState((p) => ({ ...p, activeTrackKey: key }))}
         onAdd={addTrack}
+        onRemove={(t) => {
+          if (confirm(`Remove "${t.name || "Untitled"}" from this campaign?`)) removeTrack(t.key);
+        }}
       />
 
       {active && (
@@ -317,6 +321,7 @@ function TrackBar({
   defaultVerticalKey,
   onSelect,
   onAdd,
+  onRemove,
 }: {
   tracks: WizardTrack[];
   activeKey: string | null;
@@ -326,6 +331,7 @@ function TrackBar({
   defaultVerticalKey: string;
   onSelect: (key: string) => void;
   onAdd: (track: WizardTrack) => void;
+  onRemove: (track: WizardTrack) => void;
 }) {
   // Saved sequences with job positions first: those are the ones built
   // for this — "one for HR, one for sales".
@@ -347,31 +353,56 @@ function TrackBar({
       </CardHeader>
       <CardContent className="space-y-3">
         <div className="flex flex-wrap gap-2">
-          {tracks.map((t) => (
-            <button
-              key={t.key}
-              type="button"
-              onClick={() => onSelect(t.key)}
-              className={cn(
-                "flex items-center gap-2 rounded-lg border px-3 py-2 text-sm font-medium transition-colors",
-                t.key === activeKey
-                  ? "border-primary bg-primary text-primary-foreground"
-                  : "border-border bg-card hover:border-primary/40",
-              )}
-            >
-              {t.name || "Untitled"}
-              {showCounts && (
-                <span
-                  className={cn(
-                    "rounded-full px-1.5 text-xs",
-                    t.key === activeKey ? "bg-white/20" : "bg-muted text-muted-foreground",
-                  )}
+          {tracks.map((t) => {
+            const isActive = t.key === activeKey;
+            return (
+              <div
+                key={t.key}
+                className={cn(
+                  "flex items-center rounded-lg border text-sm font-medium transition-colors",
+                  isActive
+                    ? "border-primary bg-primary text-primary-foreground"
+                    : "border-border bg-card hover:border-primary/40",
+                )}
+              >
+                <button
+                  type="button"
+                  onClick={() => onSelect(t.key)}
+                  className={cn("flex items-center gap-2 py-2 pl-3", tracks.length > 1 ? "pr-1.5" : "pr-3")}
                 >
-                  {counts.get(t.key) ?? 0}
-                </span>
-              )}
-            </button>
-          ))}
+                  {t.name || "Untitled"}
+                  {showCounts && (
+                    <span
+                      className={cn(
+                        "rounded-full px-1.5 text-xs",
+                        isActive ? "bg-white/20" : "bg-muted text-muted-foreground",
+                      )}
+                    >
+                      {counts.get(t.key) ?? 0}
+                    </span>
+                  )}
+                </button>
+                {/* A campaign needs at least one sequence, so the last one
+                    can be changed (load another template) but not removed. */}
+                {tracks.length > 1 && (
+                  <button
+                    type="button"
+                    aria-label={`Remove ${t.name || "Untitled"}`}
+                    title="Remove from this campaign"
+                    onClick={() => onRemove(t)}
+                    className={cn(
+                      "mr-1.5 rounded p-0.5 transition-colors",
+                      isActive
+                        ? "text-primary-foreground/70 hover:bg-white/20 hover:text-primary-foreground"
+                        : "text-muted-foreground hover:bg-destructive/10 hover:text-destructive",
+                    )}
+                  >
+                    <X className="h-3.5 w-3.5" />
+                  </button>
+                )}
+              </div>
+            );
+          })}
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
@@ -490,8 +521,13 @@ function TrackEditor({
                 <BookmarkPlus className="h-3.5 w-3.5" /> Save to library
               </Button>
               {canRemove && (
-                <Button variant="ghost" size="sm" onClick={onRemove}>
-                  <Trash2 className="h-3.5 w-3.5" /> Remove
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={onRemove}
+                  className="text-destructive hover:bg-destructive/10 hover:text-destructive"
+                >
+                  <Trash2 className="h-3.5 w-3.5" /> Remove sequence
                 </Button>
               )}
             </div>
