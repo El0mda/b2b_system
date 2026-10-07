@@ -71,6 +71,35 @@ function lushaDepartment(d: any): string | undefined {
   return String(name).trim() || undefined;
 }
 
+/**
+ * Calls lusha-proxy and returns its data, or throws Lusha's own reason.
+ *
+ * supabase.functions.invoke turns any non-2xx into a generic "Edge
+ * Function returned a non-2xx status code"; the proxy's actual error —
+ * expired search, out of credits — is in the response body, so it's read
+ * from there, and Lusha's sentence is pulled out of the JSON it wraps.
+ */
+async function callLusha(body: Record<string, unknown>): Promise<any> {
+  const { data, error } = await supabase.functions.invoke("lusha-proxy", { body });
+  if (!error) return data;
+  let message: string = error.message || "Lusha request failed";
+  const ctx = (error as any).context;
+  if (ctx && typeof ctx.json === "function") {
+    try {
+      const b = await ctx.json();
+      if (b?.error) message = String(b.error);
+    } catch {
+      // body wasn't JSON; keep the generic message
+    }
+  }
+  const lusha = /"message"\s*:\s*"([^"]+)"/.exec(message);
+  throw new Error(lusha ? lusha[1] : message);
+}
+
+/** Lusha's answer when a search's requestId is too old to enrich against. */
+const isExpiredSearch = (e: unknown) =>
+  /not found or expired|perform a search first/i.test(String((e as Error)?.message ?? e));
+
 export function LushaSearch({
   filters,
   setFilters,
@@ -106,6 +135,10 @@ export function LushaSearch({
   const [searching, setSearching] = useState(false);
   const [enriching, setEnriching] = useState(false);
   const [prospects, setProspects] = useState<LushaProspect[]>([]);
+  // The filters and page each result came from, so an enrich whose search
+  // has expired can re-run that page for a fresh requestId.
+  const searchedFilters = useRef<LushaFilters | null>(null);
+  const pageOf = useRef(new Map<string, number>());
   const [selectedProspectIds, setSelectedProspectIds] = useState<Set<string>>(
     new Set(),
   );
@@ -279,10 +312,12 @@ export function LushaSearch({
       let dedupedCount = 0;
 
       while (collected.length < target && page < MAX_PAGES && !exhausted) {
-        const { data, error } = await supabase.functions.invoke("lusha-proxy", {
-          body: { action: "search", ...filters, max_leads: PAGE_SIZE, page },
+        const data = await callLusha({
+          action: "search",
+          ...filters,
+          max_leads: PAGE_SIZE,
+          page,
         });
-        if (error) throw new Error(error.message || "Search failed");
 
         if (data?.nameFilterIgnored && page === 0) {
           // Lusha refused the name filter rather than the whole search
@@ -309,6 +344,7 @@ export function LushaSearch({
             dedupedCount++;
             continue;
           }
+          pageOf.current.set(p.contactId, page);
           collected.push({
             id: p.contactId,
             contactId: p.contactId,
@@ -332,6 +368,7 @@ export function LushaSearch({
         page++;
       }
 
+      searchedFilters.current = filters;
       setProspects(collected);
       setSelectedProspectIds(new Set());
       if (collected.length === 0 && scannedCount > 0 && dedupedCount === scannedCount) {
@@ -375,20 +412,65 @@ export function LushaSearch({
       }
 
       const enrichedContacts: any[] = [];
-      for (const [requestId, group] of byRequestId) {
-        const { data, error } = await supabase.functions.invoke("lusha-proxy", {
-          body: {
-            action: "enrich",
-            requestId,
-            contactIds: group.map((p) => p.contactId),
-          },
+      const enrich = async (requestId: string, group: LushaProspect[]) => {
+        const data = await callLusha({
+          action: "enrich",
+          requestId,
+          contactIds: group.map((p) => p.contactId),
         });
-        if (error) throw new Error(error.message);
         enrichedContacts.push(...(data?.contacts ?? []));
+      };
+      let lost = 0;
+      for (const [requestId, group] of byRequestId) {
+        try {
+          await enrich(requestId, group);
+        } catch (e) {
+          // Lusha only enriches against a recent search. Picking leads
+          // for a while outlives it, so re-run the page these came from
+          // for a fresh requestId and enrich the same contacts against it.
+          if (!isExpiredSearch(e) || !searchedFilters.current) throw e;
+          const fresh = await callLusha({
+            action: "search",
+            ...searchedFilters.current,
+            max_leads: 50,
+            page: pageOf.current.get(group[0].contactId) ?? 0,
+          });
+          const stillThere = new Set(
+            (fresh?.prospects ?? []).map((p: any) => p.contactId),
+          );
+          const again = group.filter((p) => stillThere.has(p.contactId));
+          lost += group.length - again.length;
+          if (again.length > 0) await enrich(fresh.requestId, again);
+        }
+      }
+      if (lost > 0) {
+        toast.warning(
+          `${lost} lead${lost === 1 ? " is" : "s are"} no longer in Lusha's results and weren't enriched — search again to find them.`,
+        );
       }
 
+      // A contact Lusha couldn't reveal (no credits left, say) comes back
+      // marked unsuccessful rather than failing the whole call.
+      const failed = enrichedContacts.filter((c: any) => c?.isSuccess === false);
+      if (failed.length > 0 && failed.length === enrichedContacts.length) {
+        const why = failed[0]?.error?.message ?? failed[0]?.error;
+        throw new Error(
+          `Lusha couldn't reveal ${failed.length === 1 ? "this lead" : `these ${failed.length} leads`}` +
+            (why ? `: ${typeof why === "string" ? why : JSON.stringify(why)}` : "."),
+        );
+      }
+      if (enrichedContacts.length === 0) {
+        throw new Error("Lusha returned no contacts for this selection — search again and retry.");
+      }
+      if (failed.length > 0) {
+        toast.warning(
+          `Lusha couldn't reveal ${failed.length} of the selected leads — they were left out.`,
+        );
+      }
+      const revealed = enrichedContacts.filter((c: any) => c?.isSuccess !== false);
+
       const prospectMap = new Map(prospects.map((p) => [p.contactId, p]));
-      const mapped: LeadDraft[] = enrichedContacts.map((c: any) => {
+      const mapped: LeadDraft[] = revealed.map((c: any) => {
         const d = c.data ?? c;
         const p = prospectMap.get(c.id ?? c.contactId);
         const email = d.emailAddresses?.[0]?.email ?? d.emailAddresses?.[0]?.address ?? "";
@@ -431,7 +513,9 @@ export function LushaSearch({
 
       await onLeads(enriched);
     } catch (e: any) {
-      toast.error(e?.message || "Enrichment failed");
+      toast.error(`Enrichment failed: ${e?.message || "unknown error"}`, {
+        duration: 10000,
+      });
     } finally {
       setEnriching(false);
     }
