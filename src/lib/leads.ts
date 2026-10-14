@@ -1,5 +1,6 @@
 import { supabase } from "@/lib/supabase";
 import { logActivity } from "@/lib/activity";
+import { getFunctionErrorMessage } from "@/lib/utils";
 
 /**
  * A lead on its way into the database.
@@ -157,4 +158,46 @@ export async function saveFoundLeads({
   });
 
   return { saved: rows.length, skipped: withEmail.length - fresh.length };
+}
+
+/** Just the digits of a phone number, so "+20 100-123" and "0100123" compare. */
+export function phoneDigits(phone: string | null | undefined): string {
+  return (phone ?? "").replace(/\D/g, "");
+}
+
+/**
+ * Whether a search box's text matches this phone number. Only queries with
+ * at least 3 digits count as a phone search, so a name like "Ali" never
+ * matches every number with no digits in common.
+ */
+export function phoneMatches(phone: string | null | undefined, query: string): boolean {
+  const q = phoneDigits(query);
+  if (q.length < 3) return false;
+  const p = phoneDigits(phone);
+  // A local "0100…" should find the stored "+20100…", so the leading
+  // zero of the query is also tried without it.
+  return p.includes(q) || (q.startsWith("0") && p.includes(q.slice(1)));
+}
+
+export interface DeleteLeadsResult {
+  deleted: number;
+  skipped: number;
+  smartlead_failed: { id: string; email: string | null; error: string }[];
+}
+
+/**
+ * Deletes leads through the delete-leads function, which takes each one
+ * out of its SmartLead campaign first so a deleted lead stops being
+ * emailed. `force` deletes even the ones SmartLead wouldn't release.
+ */
+export async function deleteLeads(
+  leadIds: string[],
+  opts: { force?: boolean } = {},
+): Promise<DeleteLeadsResult> {
+  const { data, error } = await supabase.functions.invoke("delete-leads", {
+    body: { lead_ids: leadIds, force: opts.force === true },
+  });
+  if (error) throw new Error(await getFunctionErrorMessage(error));
+  if ((data as any)?.error) throw new Error((data as any).error);
+  return data as DeleteLeadsResult;
 }

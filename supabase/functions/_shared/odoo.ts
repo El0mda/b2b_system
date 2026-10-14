@@ -207,8 +207,13 @@ export async function pushLeadToOdoo(
         .from("leads")
         .update({ synced_to_odoo: true, odoo_lead_id: String(createJson.result) })
         .eq("id", lead.id);
+      // Notes written in the app before the lead reached Odoo.
+      await flushLeadNotes(sb, settings, lead.id, Number(createJson.result));
       return true;
     }
+
+    // Catches notes an earlier attempt couldn't deliver (Odoo was down).
+    await flushLeadNotes(sb, settings, lead.id, Number(lead.odoo_lead_id));
 
     // Already in Odoo — advance it, but never drag it backwards past
     // wherever a salesperson has since moved it by hand.
@@ -300,6 +305,63 @@ export async function postThreadToOdoo(
     lastPosted = m.time ?? lastPosted;
   }
   return lastPosted;
+}
+
+/**
+ * Posts one note from the app onto a crm.lead's chatter, as an internal
+ * note (mail.mt_note) so it doesn't email the opportunity's followers.
+ * Returns the mail.message id, or null if Odoo refused it.
+ */
+export async function postNoteToOdoo(
+  settings: OdooSettings,
+  odooLeadId: number,
+  note: { body: string; author?: string | null; created_at?: string | null },
+): Promise<string | null> {
+  const by = note.author ? `Note from ${escapeHtml(note.author)}` : "Note";
+  const when = note.created_at ? ` — ${escapeHtml(new Date(note.created_at).toUTCString())}` : "";
+  const res = await odooCall(settings, "crm.lead", "message_post", [[odooLeadId]], {
+    body:
+      `<p><b>${by}</b>${when}</p>` +
+      `<div style="white-space:pre-wrap">${escapeHtml(note.body).replace(/\n/g, "<br>")}</div>`,
+    message_type: "comment",
+    subtype_xmlid: "mail.mt_note",
+  });
+  const parsed = await parseOdooResponse(res, "note");
+  return parsed?.result != null ? String(parsed.result) : null;
+}
+
+/**
+ * Sends every note on this lead that hasn't reached Odoo yet, oldest
+ * first, recording each one's Odoo message id as it lands — so a failure
+ * part-way re-sends only what didn't make it. Best-effort: a note that
+ * fails stays unsent for the next push to retry.
+ */
+export async function flushLeadNotes(
+  sb: any,
+  settings: OdooSettings,
+  leadId: string,
+  odooLeadId: number,
+): Promise<void> {
+  if (!odooLeadId || Number.isNaN(odooLeadId)) return;
+  try {
+    const { data: notes } = await sb
+      .from("lead_notes")
+      .select("id, body, created_at, users:author_id(full_name, email)")
+      .eq("lead_id", leadId)
+      .is("odoo_message_id", null)
+      .order("created_at", { ascending: true });
+    for (const n of (notes ?? []) as any[]) {
+      const messageId = await postNoteToOdoo(settings, odooLeadId, {
+        body: n.body,
+        author: n.users?.full_name ?? n.users?.email ?? null,
+        created_at: n.created_at,
+      });
+      if (!messageId) return;
+      await sb.from("lead_notes").update({ odoo_message_id: messageId }).eq("id", n.id);
+    }
+  } catch (e) {
+    console.error("Odoo note sync failed:", e);
+  }
 }
 
 // Highest engagement level a lead has reached, for callers that observe

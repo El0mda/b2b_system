@@ -21,6 +21,9 @@ import {
   RefreshCw,
   Send,
   Loader2,
+  Search,
+  StickyNote,
+  Trash2,
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -28,8 +31,11 @@ import { supabase } from "@/lib/supabase";
 import { useAuth } from "@/hooks/use-auth";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { FullPageSpinner } from "@/components/ui/spinner";
 import { cn } from "@/lib/utils";
+import { phoneDigits, phoneMatches } from "@/lib/leads";
+import { useAddLeadNote, useDeleteLeadNote, useLeadNotes } from "@/lib/lead-notes";
 
 interface CrmLead {
   id: string;
@@ -78,6 +84,8 @@ export default function CrmPage() {
   const { organization } = useAuth();
   const orgId = organization?.id;
   const [selected, setSelected] = useState<CrmLead | null>(null);
+  const [search, setSearch] = useState("");
+  const [phoneFilter, setPhoneFilter] = useState<"all" | "with" | "without">("all");
   const queryClient = useQueryClient();
 
   // Manual override for a lead that hasn't clicked or replied and so
@@ -99,6 +107,8 @@ export default function CrmPage() {
       if (res.pushed > 0) {
         toast.success("Lead pushed to Odoo");
         setSelected((prev) => (prev && prev.id === leadId ? { ...prev, synced_to_odoo: true } : prev));
+        // Notes written before the push were sent across with it.
+        queryClient.invalidateQueries({ queryKey: ["lead-notes", leadId] });
       } else {
         toast.error("Couldn't push this lead — check the Odoo connection.");
       }
@@ -174,7 +184,21 @@ export default function CrmPage() {
   const byColumn = useMemo(() => {
     const grouped: Record<string, CrmLead[]> = {};
     for (const col of columns) grouped[col.key] = [];
+    const q = search.trim().toLowerCase();
     for (const lead of leads) {
+      const hasPhone = phoneDigits(lead.phone).length > 0;
+      if (phoneFilter === "with" && !hasPhone) continue;
+      if (phoneFilter === "without" && hasPhone) continue;
+      if (
+        q &&
+        !phoneMatches(lead.phone, q) &&
+        ![lead.full_name, lead.first_name, lead.last_name, lead.email, lead.company, lead.job_title]
+          .filter(Boolean)
+          .join(" ")
+          .toLowerCase()
+          .includes(q)
+      )
+        continue;
       // Match on the stage name Odoo reported for this lead. An unknown
       // name (stage renamed or deleted since the last sync) falls back
       // rather than dropping the lead off the board.
@@ -182,7 +206,8 @@ export default function CrmPage() {
       grouped[key].push(lead);
     }
     return grouped;
-  }, [leads, columns]);
+  }, [leads, columns, search, phoneFilter]);
+  const shown = Object.values(byColumn).reduce((n, list) => n + list.length, 0);
 
   if (isLoading) return <FullPageSpinner />;
 
@@ -214,6 +239,46 @@ export default function CrmPage() {
           Couldn't reach Odoo — check the connection in Settings.
         </p>
       )}
+
+      <div className="flex flex-wrap items-center gap-2">
+        <div className="relative min-w-[220px] flex-1 sm:max-w-sm">
+          <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+          <Input
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Search name, company or phone number..."
+            className="pl-9"
+          />
+        </div>
+        <div className="flex rounded-md border border-border p-0.5 text-sm">
+          {(
+            [
+              ["all", "All"],
+              ["with", "Has phone"],
+              ["without", "No phone"],
+            ] as const
+          ).map(([key, label]) => (
+            <button
+              key={key}
+              type="button"
+              onClick={() => setPhoneFilter(key)}
+              className={cn(
+                "rounded px-3 py-1 transition-colors",
+                phoneFilter === key
+                  ? "bg-primary text-primary-foreground"
+                  : "text-muted-foreground hover:text-foreground",
+              )}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+        {(search || phoneFilter !== "all") && (
+          <span className="text-xs text-muted-foreground">
+            {shown} of {leads.length} shown
+          </span>
+        )}
+      </div>
 
       {stages.length === 0 && (
         <p className="rounded-lg border border-dashed border-border p-4 text-sm text-muted-foreground">
@@ -253,6 +318,12 @@ export default function CrmPage() {
                     <p className="truncate text-xs text-muted-foreground">
                       {[lead.job_title, lead.company].filter(Boolean).join(" · ") || "—"}
                     </p>
+                    {lead.phone && (
+                      <p className="mt-1 flex items-center gap-1 truncate text-xs font-medium text-foreground">
+                        <Phone className="h-3 w-3 shrink-0 text-muted-foreground" />
+                        <span dir="ltr">{lead.phone}</span>
+                      </p>
+                    )}
                     <div className="mt-2 flex flex-wrap gap-1.5">
                       {lead.campaigns?.name && (
                         <Badge variant="secondary">{lead.campaigns.name}</Badge>
@@ -342,6 +413,8 @@ function LeadDetail({
             </div>
           )}
 
+          <LeadNotes leadId={lead.id} inOdoo={!!lead.synced_to_odoo} />
+
           <div className="space-y-2">
             <h4 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
               Odoo CRM
@@ -388,6 +461,87 @@ function LeadDetail({
           </div>
         </div>
       </div>
+    </div>
+  );
+}
+
+function LeadNotes({ leadId, inOdoo }: { leadId: string; inOdoo: boolean }) {
+  const { profile } = useAuth();
+  const { data: notes = [], isLoading } = useLeadNotes(leadId);
+  const add = useAddLeadNote(leadId);
+  const remove = useDeleteLeadNote(leadId);
+  const [draft, setDraft] = useState("");
+  const isAdmin = profile?.role === "owner" || profile?.role === "admin";
+
+  const save = () => {
+    const body = draft.trim();
+    if (!body || add.isPending) return;
+    add.mutate(body, { onSuccess: () => setDraft("") });
+  };
+
+  return (
+    <div className="space-y-2">
+      <h4 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+        Notes
+      </h4>
+      <textarea
+        value={draft}
+        onChange={(e) => setDraft(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
+            e.preventDefault();
+            save();
+          }
+        }}
+        rows={3}
+        placeholder="Called, asked for a proposal next week…"
+        className="w-full resize-y rounded-md border border-input bg-background px-3 py-2 text-sm shadow-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+      />
+      <div className="flex items-center justify-between gap-2">
+        <p className="text-xs text-muted-foreground">
+          {inOdoo
+            ? "Added to the Odoo opportunity too."
+            : "Sent to Odoo when this lead is pushed there."}
+        </p>
+        <Button size="sm" onClick={save} disabled={!draft.trim() || add.isPending}>
+          {add.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <StickyNote className="h-4 w-4" />}
+          Add note
+        </Button>
+      </div>
+
+      {isLoading ? (
+        <p className="text-xs text-muted-foreground">Loading notes…</p>
+      ) : (
+        notes.map((n) => (
+          <div key={n.id} className="rounded-lg border border-border bg-muted/20 p-3 text-sm">
+            <div className="mb-1 flex flex-wrap items-center gap-2 text-[11px] text-muted-foreground">
+              <span className="font-medium">
+                {n.author_id === profile?.id ? "You" : (n.users?.full_name ?? n.users?.email ?? "Someone")}
+              </span>
+              <span>{format(new Date(n.created_at), "MMM d, yyyy HH:mm")}</span>
+              {n.odoo_message_id ? (
+                <Badge variant="success">In Odoo</Badge>
+              ) : (
+                <Badge variant="secondary">Not in Odoo yet</Badge>
+              )}
+              {(n.author_id === profile?.id || isAdmin) && (
+                <button
+                  type="button"
+                  aria-label="Delete note"
+                  title={n.odoo_message_id ? "Delete here (stays in Odoo)" : "Delete note"}
+                  className="ml-auto rounded p-0.5 hover:bg-destructive/10 hover:text-destructive"
+                  onClick={() => {
+                    if (confirm("Delete this note?")) remove.mutate(n.id);
+                  }}
+                >
+                  <Trash2 className="h-3.5 w-3.5" />
+                </button>
+              )}
+            </div>
+            <p className="whitespace-pre-wrap break-words">{n.body}</p>
+          </div>
+        ))
+      )}
     </div>
   );
 }

@@ -28,7 +28,9 @@ import {
   Rocket,
   UserPlus,
   Layers,
+  Trash2,
 } from "lucide-react";
+import * as XLSX from "xlsx";
 
 import { supabase } from "@/lib/supabase";
 import { useAuth } from "@/hooks/use-auth";
@@ -40,6 +42,7 @@ import { Badge } from "@/components/ui/badge";
 import { Checkbox } from "@/components/ui/checkbox";
 import { FullPageSpinner } from "@/components/ui/spinner";
 import { cn } from "@/lib/utils";
+import { deleteLeads, phoneDigits, phoneMatches } from "@/lib/leads";
 
 const PAGE_SIZE = 25;
 
@@ -86,6 +89,8 @@ export default function LeadsPage() {
   const [emailStatusFilter, setEmailStatusFilter] = useState("all");
   const [engagementFilter, setEngagementFilter] = useState("all");
   const [odooFilter, setOdooFilter] = useState("all");
+  const [phoneFilter, setPhoneFilter] = useState("all");
+  const [deleting, setDeleting] = useState(false);
   const [page, setPage] = useState(0);
   const [selectedLead, setSelectedLead] = useState<LeadRow | null>(null);
   const [pushingId, setPushingId] = useState<string | null>(null);
@@ -173,7 +178,7 @@ export default function LeadsPage() {
       if (search) {
         const q = search.toLowerCase();
         const name = (l.full_name ?? `${l.first_name ?? ""} ${l.last_name ?? ""}`).toLowerCase();
-        if (!name.includes(q) && !(l.email ?? "").toLowerCase().includes(q) && !(l.company ?? "").toLowerCase().includes(q) && !(l.job_title ?? "").toLowerCase().includes(q)) return false;
+        if (!name.includes(q) && !(l.email ?? "").toLowerCase().includes(q) && !(l.company ?? "").toLowerCase().includes(q) && !(l.job_title ?? "").toLowerCase().includes(q) && !phoneMatches(l.phone, q)) return false;
       }
       if (campaignFilter === "none" && l.campaign_id) return false;
       if (campaignFilter !== "all" && campaignFilter !== "none" && l.campaign_id !== campaignFilter)
@@ -188,9 +193,11 @@ export default function LeadsPage() {
       if (engagementFilter === "replied" && !l.replied_at) return false;
       if (odooFilter === "yes" && !l.synced_to_odoo) return false;
       if (odooFilter === "no" && l.synced_to_odoo) return false;
+      if (phoneFilter === "with" && !phoneDigits(l.phone)) return false;
+      if (phoneFilter === "without" && phoneDigits(l.phone)) return false;
       return true;
     });
-  }, [allLeads, search, campaignFilter, sourceFilter, emailStatusFilter, engagementFilter, odooFilter]);
+  }, [allLeads, search, campaignFilter, sourceFilter, emailStatusFilter, engagementFilter, odooFilter, phoneFilter]);
 
   // Leads saved from a search and not yet used — the pool a campaign
   // can be started from.
@@ -207,7 +214,13 @@ export default function LeadsPage() {
 
   // A lead already in a campaign stays there: adding it to a second one
   // would have SmartLead emailing the same person down two sequences.
-  const canSelect = (l: LeadRow) => !l.campaign_id && !!l.email;
+  // Any lead can still be ticked — for deleting — and starting a campaign
+  // takes only the ticked leads that qualify.
+  const canStartCampaign = (l: LeadRow) => !l.campaign_id && !!l.email;
+  const campaignReadyIds = useMemo(
+    () => allLeads.filter((l) => selectedIds.has(l.id) && canStartCampaign(l)).map((l) => l.id),
+    [allLeads, selectedIds],
+  );
 
   const toggleOne = (id: string) =>
     setSelectedIds((prev) => {
@@ -218,37 +231,98 @@ export default function LeadsPage() {
     });
 
   const startCampaign = () => {
-    const ids = [...selectedIds];
+    const ids = campaignReadyIds;
     if (ids.length === 0) return;
     navigate("/campaigns/new", { state: { leadIds: ids } });
   };
 
   const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
   const paged = filtered.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE);
-  const selectablePaged = paged.filter(canSelect);
+  const selectablePaged = paged;
 
+  const removeLeads = async (ids: string[]) => {
+    if (ids.length === 0) return;
+    const inCampaign = allLeads.filter((l) => ids.includes(l.id) && l.campaign_id).length;
+    const label = ids.length === 1 ? "this lead" : `these ${ids.length} leads`;
+    if (
+      !confirm(
+        `Delete ${label}? This can't be undone.` +
+          (inCampaign > 0
+            ? `\n\n${inCampaign} ${inCampaign === 1 ? "is" : "are"} in a campaign — they'll be taken out of SmartLead first, so no more emails go to them.`
+            : "") +
+          "\n\nAnything already in Odoo stays there.",
+      )
+    )
+      return;
+    setDeleting(true);
+    try {
+      let res = await deleteLeads(ids);
+      if (res.smartlead_failed.length > 0) {
+        const n = res.smartlead_failed.length;
+        const force = confirm(
+          `SmartLead wouldn't release ${n} lead${n === 1 ? "" : "s"}, so ${n === 1 ? "it was" : "they were"} kept:\n` +
+            res.smartlead_failed.slice(0, 3).map((f) => `• ${f.email ?? f.id}: ${f.error}`).join("\n") +
+            `\n\nDelete ${n === 1 ? "it" : "them"} from the app anyway? SmartLead may keep emailing ${n === 1 ? "this person" : "these people"} — pause or remove ${n === 1 ? "it" : "them"} there yourself.`,
+        );
+        if (force) {
+          const forced = await deleteLeads(res.smartlead_failed.map((f) => f.id), { force: true });
+          res = { ...res, deleted: res.deleted + forced.deleted };
+        }
+      }
+      if (res.deleted > 0) {
+        toast.success(res.deleted === 1 ? "Lead deleted" : `${res.deleted} leads deleted`);
+      }
+      setSelectedIds((prev) => {
+        const next = new Set(prev);
+        ids.forEach((id) => next.delete(id));
+        return next;
+      });
+      setSelectedLead((prev) => (prev && ids.includes(prev.id) ? null : prev));
+      qc.invalidateQueries({ queryKey: ["all-leads", orgId] });
+      qc.invalidateQueries({ queryKey: ["crm-leads", orgId] });
+    } catch (e: any) {
+      toast.error(e?.message || "Couldn't delete the leads");
+    } finally {
+      setDeleting(false);
+    }
+  };
+
+  // A real Excel file rather than CSV: Excel reads a CSV phone number as
+  // a number, dropping the leading "+" or "0". Here every cell is written
+  // as text, so +201001234567 stays exactly that.
   const handleExport = () => {
-    const headers = ["Name", "Email", "Company", "Title", "Campaign", "Source", "Email Status", "Engagement", "Reply", "Date"];
-    const rows = filtered.map((l) => [
-      l.full_name ?? `${l.first_name ?? ""} ${l.last_name ?? ""}`.trim(),
-      l.email ?? "",
-      l.company ?? "",
-      l.job_title ?? "",
-      l.campaigns?.name ?? "",
-      l.source ?? "",
-      l.nb_result ?? "",
-      l.replied_at ? "Replied" : l.email_clicked ? "Clicked" : l.email_opened ? "Opened" : l.email_delivered ? "Delivered" : "Pending",
-      l.reply_text ?? "",
-      l.created_at ? format(new Date(l.created_at), "MMM d, yyyy") : "",
-    ]);
-    const csv = [headers.join(","), ...rows.map((r) => r.map((c) => `"${c.replace(/"/g, '""')}"`).join(","))].join("\n");
-    const blob = new Blob([csv], { type: "text/csv" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `all-leads-${new Date().toISOString().slice(0, 10)}.csv`;
-    a.click();
-    URL.revokeObjectURL(url);
+    const rows = filtered.map((l) => ({
+      Name: l.full_name ?? `${l.first_name ?? ""} ${l.last_name ?? ""}`.trim(),
+      Email: l.email ?? "",
+      Phone: l.phone ?? "",
+      Company: l.company ?? "",
+      Title: l.job_title ?? "",
+      Department: l.department ?? "",
+      Location: l.location ?? "",
+      LinkedIn: l.linkedin_url ?? "",
+      Campaign: l.campaigns?.name ?? "",
+      Source: l.source ?? "",
+      "Email Status": l.nb_result ?? "",
+      Engagement: l.replied_at ? "Replied" : l.email_clicked ? "Clicked" : l.email_opened ? "Opened" : l.email_delivered ? "Delivered" : "Pending",
+      Reply: l.reply_text ?? "",
+      Odoo: l.synced_to_odoo ? "Synced" : "Not synced",
+      Date: l.created_at ? format(new Date(l.created_at), "yyyy-MM-dd") : "",
+    }));
+    const sheet = XLSX.utils.json_to_sheet(rows);
+    // json_to_sheet already writes strings as text cells; the "@" format
+    // keeps Excel from re-reading the phone column as a number on edit.
+    const range = XLSX.utils.decode_range(sheet["!ref"] ?? "A1");
+    for (let r = range.s.r + 1; r <= range.e.r; r++) {
+      const cell = sheet[XLSX.utils.encode_cell({ r, c: 2 })];
+      if (cell) {
+        cell.t = "s";
+        cell.z = "@";
+      }
+    }
+    sheet["!cols"] = [28, 32, 18, 26, 26, 16, 20, 30, 20, 10, 12, 12, 40, 12, 12].map((wch) => ({ wch }));
+    const book = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(book, sheet, "Leads");
+    XLSX.writeFile(book, `leads-${new Date().toISOString().slice(0, 10)}.xlsx`);
   };
 
   if (isLoading) return <FullPageSpinner />;
@@ -274,7 +348,7 @@ export default function LeadsPage() {
             </Link>
           </Button>
           <Button variant="outline" onClick={handleExport}>
-            <Download className="h-4 w-4" /> Export CSV
+            <Download className="h-4 w-4" /> Export Excel
           </Button>
         </div>
       </div>
@@ -329,8 +403,30 @@ export default function LeadsPage() {
             <Button variant="ghost" size="sm" onClick={() => setSelectedIds(new Set())}>
               Clear
             </Button>
-            <Button size="sm" onClick={startCampaign}>
-              <Rocket className="h-4 w-4" /> Start campaign with these leads
+            <Button
+              variant="outline"
+              size="sm"
+              className="text-destructive hover:bg-destructive/10 hover:text-destructive"
+              onClick={() => removeLeads([...selectedIds])}
+              disabled={deleting}
+            >
+              {deleting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
+              Delete
+            </Button>
+            <Button
+              size="sm"
+              onClick={startCampaign}
+              disabled={campaignReadyIds.length === 0}
+              title={
+                campaignReadyIds.length === 0
+                  ? "Only leads with an email that aren't in a campaign yet can start one"
+                  : undefined
+              }
+            >
+              <Rocket className="h-4 w-4" /> Start campaign
+              {campaignReadyIds.length !== selectedIds.size
+                ? ` with ${campaignReadyIds.length}`
+                : " with these leads"}
             </Button>
           </div>
         </div>
@@ -343,7 +439,7 @@ export default function LeadsPage() {
             <div className="relative flex-1 min-w-[200px]">
               <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
               <Input
-                placeholder="Search name, email, company, title..."
+                placeholder="Search name, email, company, title, phone..."
                 value={search}
                 onChange={(e) => { setSearch(e.target.value); setPage(0); }}
                 className="pl-9"
@@ -380,6 +476,11 @@ export default function LeadsPage() {
               <option value="yes">Odoo: Synced</option>
               <option value="no">Odoo: Not Synced</option>
             </Select>
+            <Select value={phoneFilter} onChange={(e) => { setPhoneFilter(e.target.value); setPage(0); }}>
+              <option value="all">Phone: All</option>
+              <option value="with">Has phone</option>
+              <option value="without">No phone</option>
+            </Select>
           </div>
 
           {/* Table */}
@@ -408,6 +509,7 @@ export default function LeadsPage() {
                   </Th>
                   <Th>Name</Th>
                   <Th>Email</Th>
+                  <Th>Phone</Th>
                   <Th>Company</Th>
                   <Th>Title</Th>
                   <Th>Campaign</Th>
@@ -429,14 +531,6 @@ export default function LeadsPage() {
                     <Td onClick={(e) => e.stopPropagation()}>
                       <Checkbox
                         checked={selectedIds.has(l.id)}
-                        disabled={!canSelect(l)}
-                        title={
-                          l.campaign_id
-                            ? "Already in a campaign"
-                            : !l.email
-                              ? "No email address"
-                              : undefined
-                        }
                         onCheckedChange={() => toggleOne(l.id)}
                       />
                     </Td>
@@ -444,6 +538,9 @@ export default function LeadsPage() {
                       {(l.full_name ?? `${l.first_name ?? ""} ${l.last_name ?? ""}`.trim()) || "—"}
                     </Td>
                     <Td>{l.email ?? "—"}</Td>
+                    <Td className="whitespace-nowrap">
+                      {l.phone ? <span dir="ltr">{l.phone}</span> : <span className="text-muted-foreground">—</span>}
+                    </Td>
                     <Td className="text-muted-foreground">{l.company ?? "—"}</Td>
                     <Td className="text-muted-foreground">{l.job_title ?? "—"}</Td>
                     <Td className="text-muted-foreground">{l.campaigns?.name ?? "—"}</Td>
@@ -481,7 +578,7 @@ export default function LeadsPage() {
                 ))}
                 {paged.length === 0 && (
                   <tr>
-                    <td colSpan={12} className="p-12 text-center text-sm text-muted-foreground">
+                    <td colSpan={13} className="p-12 text-center text-sm text-muted-foreground">
                       No leads found.
                     </td>
                   </tr>
@@ -514,6 +611,8 @@ export default function LeadsPage() {
           onClose={() => setSelectedLead(null)}
           onPush={() => handlePush(selectedLead.id)}
           pushing={pushingId === selectedLead.id}
+          onDelete={() => removeLeads([selectedLead.id])}
+          deleting={deleting}
         />
       )}
     </div>
@@ -649,11 +748,15 @@ function LeadSlideOver({
   onClose,
   onPush,
   pushing,
+  onDelete,
+  deleting,
 }: {
   lead: LeadRow;
   onClose: () => void;
   onPush: () => void;
   pushing: boolean;
+  onDelete: () => void;
+  deleting: boolean;
 }) {
   return (
     <div className="fixed inset-0 z-50 flex justify-end">
@@ -666,9 +769,22 @@ function LeadSlideOver({
             </h3>
             <p className="text-sm text-muted-foreground">{lead.email}</p>
           </div>
-          <Button variant="ghost" size="icon" onClick={onClose}>
-            <X className="h-5 w-5" />
-          </Button>
+          <div className="flex items-center gap-1">
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={onDelete}
+              disabled={deleting}
+              aria-label="Delete lead"
+              title="Delete lead"
+              className="text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
+            >
+              {deleting ? <Loader2 className="h-5 w-5 animate-spin" /> : <Trash2 className="h-5 w-5" />}
+            </Button>
+            <Button variant="ghost" size="icon" onClick={onClose}>
+              <X className="h-5 w-5" />
+            </Button>
+          </div>
         </div>
         <div className="flex-1 overflow-y-auto p-6 space-y-6">
           <div className="space-y-3">
