@@ -14,6 +14,10 @@
 //
 // Invoke from the app:
 //   supabase.functions.invoke("send-campaign", { body: { campaign_id } })
+//
+// With `sequence_only: true` (and `track_id` for a campaign with tracks)
+// it only re-saves that sequence's email steps on its existing SmartLead
+// campaign — used after the sequence is changed on a launched campaign.
 
 // deno-lint-ignore-file no-explicit-any
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
@@ -209,6 +213,87 @@ interface LaunchContext {
   emailAccountId: number | null;
 }
 
+/**
+ * Writes the email steps onto a SmartLead campaign, replacing whatever
+ * sequence it had. Returns an error message, or null on success.
+ */
+async function saveSequenceOnSmartlead(
+  slCampaignId: string,
+  emailSteps: EmailStep[],
+  smartleadKey: string,
+): Promise<string | null> {
+  const seqRes = await smartleadFetch(`/campaigns/${slCampaignId}/sequences`, smartleadKey, {
+    method: "POST",
+    body: JSON.stringify({
+      sequences: emailSteps.map((s, i) => ({
+        // SmartLead numbers its own steps consecutively; the original
+        // step numbers have gaps wherever a call step was removed.
+        seq_number: i + 1,
+        seq_delay_details: { delay_in_days: s.delayDays },
+        subject: toSmartleadVars(s.subject),
+        // Media goes after the newline conversion: its markup must reach
+        // SmartLead untouched, with no <br> spliced into attributes.
+        email_body: toSmartleadVars(s.body).replace(/\n/g, "<br>") + s.mediaHtml,
+      })),
+    }),
+  });
+  if (seqRes.ok) return null;
+  const txt = await seqRes.text();
+  return `SmartLead save sequence failed (${seqRes.status}): ${txt.slice(0, 300)}`;
+}
+
+/**
+ * The sequence-only mode: after a sequence was changed on a launched
+ * campaign, its new email steps replace the old ones on the SmartLead
+ * campaign that's already there — same leads, same stats, same replies.
+ * A sequence that never reached SmartLead has nothing to update; the
+ * next "Retry sending" launches it with the new steps.
+ */
+async function updateSequenceOnly(
+  userClient: any,
+  campaignId: string,
+  trackId: string | null,
+  smartleadKey: string,
+): Promise<Response> {
+  let slCampaignId: string | null;
+  if (trackId) {
+    const { data: track, error } = await userClient
+      .from("campaign_tracks")
+      .select("id, smartlead_campaign_id")
+      .eq("id", trackId)
+      .eq("campaign_id", campaignId)
+      .maybeSingle();
+    if (error || !track) return json({ error: error?.message ?? "Sequence not found" }, 404);
+    slCampaignId = track.smartlead_campaign_id;
+  } else {
+    const { data: campaign, error } = await userClient
+      .from("campaigns")
+      .select("id, smartlead_campaign_id")
+      .eq("id", campaignId)
+      .maybeSingle();
+    if (error || !campaign) return json({ error: error?.message ?? "Campaign not found" }, 404);
+    slCampaignId = campaign.smartlead_campaign_id;
+  }
+  if (!slCampaignId) return json({ ok: true, updated_on_smartlead: false });
+
+  let query = userClient
+    .from("sequences")
+    .select(SEQUENCE_FIELDS)
+    .eq("campaign_id", campaignId)
+    .order("step", { ascending: true });
+  query = trackId ? query.eq("track_id", trackId) : query.is("track_id", null);
+  const { data: sequences, error: sequencesError } = await query;
+  if (sequencesError) return json({ error: sequencesError.message }, 500);
+
+  const emailSteps = buildEmailSteps((sequences ?? []) as SequenceRow[]);
+  if (emailSteps.length === 0) {
+    return json({ error: "This sequence has no email steps — nothing for SmartLead to send" }, 400);
+  }
+  const error = await saveSequenceOnSmartlead(slCampaignId, emailSteps, smartleadKey);
+  if (error) return json({ error }, 502);
+  return json({ ok: true, updated_on_smartlead: true, email_steps: emailSteps.length });
+}
+
 type LaunchOutcome =
   | { ok: true; slCampaignId: string; emailSteps: number }
   | { ok: false; error: string };
@@ -276,25 +361,8 @@ async function launchOnSmartlead(
   };
 
   // ── Step B: Save email sequence ──
-  const seqRes = await smartleadFetch(`/campaigns/${slCampaignId}/sequences`, smartleadKey, {
-    method: "POST",
-    body: JSON.stringify({
-      sequences: emailSteps.map((s, i) => ({
-        // SmartLead numbers its own steps consecutively; the original
-        // step numbers have gaps wherever a call step was removed.
-        seq_number: i + 1,
-        seq_delay_details: { delay_in_days: s.delayDays },
-        subject: toSmartleadVars(s.subject),
-        // Media goes after the newline conversion: its markup must reach
-        // SmartLead untouched, with no <br> spliced into attributes.
-        email_body: toSmartleadVars(s.body).replace(/\n/g, "<br>") + s.mediaHtml,
-      })),
-    }),
-  });
-  if (!seqRes.ok) {
-    const txt = await seqRes.text();
-    return fail(`SmartLead save sequence failed (${seqRes.status}): ${txt.slice(0, 300)}`);
-  }
+  const seqError = await saveSequenceOnSmartlead(slCampaignId, emailSteps, smartleadKey);
+  if (seqError) return fail(seqError);
 
   // ── Step C: Add leads ──
   const leadsRes = await smartleadFetch(`/campaigns/${slCampaignId}/leads`, smartleadKey, {
@@ -458,7 +526,7 @@ Deno.serve(async (req) => {
       );
     }
 
-    const { campaign_id } = await req.json();
+    const { campaign_id, track_id, sequence_only } = await req.json();
     if (!campaign_id) return json({ error: "campaign_id is required" }, 400);
 
     const userClient = createClient(
@@ -468,6 +536,10 @@ Deno.serve(async (req) => {
         global: { headers: { Authorization: auth } },
       },
     );
+
+    if (sequence_only) {
+      return await updateSequenceOnly(userClient, campaign_id, track_id ?? null, smartleadKey);
+    }
 
     // 1. Fetch campaign from DB
     const { data: campaign, error: campaignError } = await userClient

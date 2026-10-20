@@ -67,6 +67,7 @@ import {
 } from "@/components/ui/dialog";
 import { cn, getFunctionErrorMessage } from "@/lib/utils";
 import { parseMedia } from "@/lib/email-media";
+import { ChangeSequenceDialog } from "@/components/campaign/change-sequence-dialog";
 
 type Tab = "overview" | "leads" | "sequences" | "performance" | "activity";
 
@@ -516,7 +517,9 @@ export default function CampaignDetailPage() {
           onCloseLead={() => setSelectedLead(null)}
         />
       )}
-      {tab === "sequences" && <TabSequences sequences={sequences} tracks={tracks} />}
+      {tab === "sequences" && (
+        <TabSequences campaign={campaign} sequences={sequences} tracks={tracks} leads={leads} />
+      )}
       {tab === "performance" && (
         <TabPerformance leads={leads} campaign={campaign} />
       )}
@@ -939,31 +942,84 @@ function describeStepDelay(s: SequenceStep): string {
 
 // Steps grouped under the sequence they belong to. A campaign with a
 // single sequence (or none recorded — pre-multi-sequence) renders exactly
-// as it always did.
+// as it always did. Each can be swapped for another while the campaign
+// is paused.
 function TabSequences({
+  campaign,
   sequences,
   tracks,
+  leads,
 }: {
+  campaign: Campaign;
   sequences: SequenceStep[];
   tracks: CampaignTrack[];
+  leads: Lead[];
 }) {
-  if (tracks.length <= 1) return <StepCards sequences={sequences} />;
+  // undefined: closed · null: the campaign's only (pre-tracks) sequence
+  const [changing, setChanging] = useState<CampaignTrack | null | undefined>(undefined);
+  const isActive = campaign.status === "active";
+
+  const changeButton = (target: CampaignTrack | null) => (
+    <Button
+      size="sm"
+      variant="outline"
+      disabled={isActive}
+      title={isActive ? "Pause the campaign (set it to draft) to change its sequence" : undefined}
+      onClick={() => setChanging(target)}
+    >
+      <FileEdit className="h-3.5 w-3.5" />
+      Change sequence
+    </Button>
+  );
+
+  const single = tracks.length <= 1 ? (tracks[0] ?? null) : undefined;
+
   return (
-    <div className="space-y-8">
-      {tracks.map((t) => (
-        <div key={t.id} className="space-y-3">
-          <div className="flex flex-wrap items-center gap-2">
-            <h3 className="text-base font-semibold">{t.name}</h3>
-            <TrackStatusBadge status={t.status} />
-            <Badge variant="secondary">{t.lead_count} leads</Badge>
-            {t.is_default && <Badge variant="outline">Default</Badge>}
-          </div>
-          {trackAudience(t) && (
-            <p className="text-xs text-muted-foreground">For: {trackAudience(t)}</p>
-          )}
-          <StepCards sequences={sequences.filter((s) => s.track_id === t.id)} />
+    <div className="space-y-4">
+      {isActive && (
+        <p className="text-sm text-muted-foreground">
+          To change a sequence, pause the campaign first (⋯ → Set to draft), then activate it again
+          when you're done.
+        </p>
+      )}
+      {single !== undefined ? (
+        <>
+          <div className="flex justify-end">{changeButton(single)}</div>
+          <StepCards sequences={sequences} />
+        </>
+      ) : (
+        <div className="space-y-8">
+          {tracks.map((t) => (
+            <div key={t.id} className="space-y-3">
+              <div className="flex flex-wrap items-center gap-2">
+                <h3 className="text-base font-semibold">{t.name}</h3>
+                <TrackStatusBadge status={t.status} />
+                <Badge variant="secondary">{t.lead_count} leads</Badge>
+                {t.is_default && <Badge variant="outline">Default</Badge>}
+                <div className="ml-auto">{changeButton(t)}</div>
+              </div>
+              {trackAudience(t) && (
+                <p className="text-xs text-muted-foreground">For: {trackAudience(t)}</p>
+              )}
+              <StepCards sequences={sequences.filter((s) => s.track_id === t.id)} />
+            </div>
+          ))}
         </div>
-      ))}
+      )}
+
+      {changing !== undefined && (
+        <ChangeSequenceDialog
+          open
+          onClose={() => setChanging(undefined)}
+          campaignId={campaign.id}
+          campaignName={campaign.name}
+          track={changing ? { id: changing.id, name: changing.name } : null}
+          currentSteps={
+            changing ? sequences.filter((s) => s.track_id === changing.id) : sequences
+          }
+          leads={changing ? leads.filter((l) => l.track_id === changing.id) : leads}
+        />
+      )}
     </div>
   );
 }
