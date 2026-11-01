@@ -75,6 +75,9 @@ interface Message {
   from: string | null;
   // Everyone copied on it, so a salesperson can see who else is reading.
   cc: string[];
+  // Every addressee. On a reply-all, the lead's colleagues land here
+  // rather than in cc.
+  to: string[];
   // Needed to thread a reply onto the right message; not sent to the app.
   raw: any;
 }
@@ -121,6 +124,7 @@ export function normalizeHistory(history: any[]): Message[] {
       // to use is tried. Missing from a message means nobody was copied.
       from: parseAddresses(h?.from ?? h?.from_email ?? h?.sender_email)[0] ?? null,
       cc: parseAddresses(h?.cc ?? h?.cc_emails ?? h?.cc_email ?? h?.email_cc ?? h?.cc_list),
+      to: parseAddresses(h?.to ?? h?.to_email),
       raw: h,
     }))
     .sort((a, b) => stamp(a.time) - stamp(b.time));
@@ -265,12 +269,38 @@ Deno.serve(async (req) => {
     // Field names only, never content: shows in the function logs which
     // keys SmartLead really sends on a reply (CC isn't documented).
     const firstReply = messages.find((m) => m.type === "reply");
-    if (firstReply) console.log("reply fields:", Object.keys(firstReply.raw ?? {}).join(", "));
+    if (firstReply) {
+      const cc = firstReply.raw?.cc;
+      console.log(
+        "reply fields:",
+        Object.keys(firstReply.raw ?? {}).join(", "),
+        `| cc: ${Array.isArray(cc) ? `array of ${cc.length}` : typeof cc}`,
+        `| to: ${firstReply.to.length} address(es)`,
+      );
+    }
 
     if (action === "thread") {
+      // Our own mailbox is always among a reply's addressees — only the
+      // others are worth showing.
+      let ownMailbox = "";
+      if (lead.campaign_id) {
+        const { data: campaign } = await userClient
+          .from("campaigns")
+          .select("sender_email")
+          .eq("id", lead.campaign_id)
+          .maybeSingle();
+        ownMailbox = (campaign?.sender_email ?? "").toLowerCase();
+      }
+      const isOwn = (a: string) => {
+        const addr = (a.match(/<([^>]+)>/)?.[1] ?? a).trim().toLowerCase();
+        return addr === ownMailbox;
+      };
       return json({
         ok: true,
-        messages: messages.map(({ raw: _raw, ...m }) => m),
+        messages: messages.map(({ raw: _raw, ...m }) => ({
+          ...m,
+          to: m.type === "reply" ? m.to.filter((a) => !isOwn(a)) : [],
+        })),
       });
     }
 

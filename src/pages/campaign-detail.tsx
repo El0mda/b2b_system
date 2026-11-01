@@ -919,6 +919,11 @@ function SentEmails({ lead }: { lead: Lead }) {
               {m.time && <span>{format(new Date(m.time), "MMM d, yyyy HH:mm")}</span>}
             </div>
             {m.subject && <p className="mb-1 font-medium">{m.subject}</p>}
+            {m.to && m.to.length > 0 && (
+              <p className="mb-1 text-[11px] text-muted-foreground">
+                <span className="font-medium text-foreground">Also to:</span> {m.to.join(", ")}
+              </p>
+            )}
             {m.cc && m.cc.length > 0 && (
               <p className="mb-1 text-[11px] text-muted-foreground">
                 <span className="font-medium text-foreground">CC:</span> {m.cc.join(", ")}

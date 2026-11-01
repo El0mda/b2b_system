@@ -298,6 +298,11 @@ function ThreadPane({
                     {m.time && <span>{format(new Date(m.time), "MMM d, HH:mm")}</span>}
                     {m.subject && m.type === "sent" && <span className="truncate">· {m.subject}</span>}
                   </div>
+                  {m.to && m.to.length > 0 && (
+                    <p className="mb-1 text-[11px] text-muted-foreground">
+                      <span className="font-medium text-foreground">Also to:</span> {m.to.join(", ")}
+                    </p>
+                  )}
                   {m.cc && m.cc.length > 0 && (
                     <p className="mb-1 text-[11px] text-muted-foreground">
                       <span className="font-medium text-foreground">CC:</span> {m.cc.join(", ")}

@@ -36,6 +36,8 @@ export interface ThreadMessage {
   from?: string | null;
   /** Everyone copied on it. */
   cc?: string[];
+  /** On a reply: addressees besides our own mailbox (a reply-all). */
+  to?: string[];
 }
 
 export function conversationName(c: Pick<Conversation, "full_name" | "first_name" | "last_name" | "email">): string {
