@@ -191,6 +191,13 @@ export default function InboxPage() {
   );
 }
 
+// "Sara <sara@acme.com>" and "sara@acme.com" are the same sender.
+function sameAddress(from: string, email: string | null): boolean {
+  if (!email) return false;
+  const addr = from.match(/<([^>]+)>/)?.[1] ?? from;
+  return addr.trim().toLowerCase() === email.trim().toLowerCase();
+}
+
 function ThreadPane({
   conversation: c,
   onBack,
@@ -284,9 +291,18 @@ function ThreadPane({
                     <span className="font-medium">
                       {m.type === "sent" ? "You" : conversationName(c)}
                     </span>
+                    {/* A reply can come from someone else at the company. */}
+                    {m.type === "reply" && m.from && !sameAddress(m.from, c.email) && (
+                      <span>via {m.from}</span>
+                    )}
                     {m.time && <span>{format(new Date(m.time), "MMM d, HH:mm")}</span>}
                     {m.subject && m.type === "sent" && <span className="truncate">· {m.subject}</span>}
                   </div>
+                  {m.cc && m.cc.length > 0 && (
+                    <p className="mb-1 text-[11px] text-muted-foreground">
+                      <span className="font-medium text-foreground">CC:</span> {m.cc.join(", ")}
+                    </p>
+                  )}
                   {/* Plain text by design — see the note at the top of the file. */}
                   <p className="whitespace-pre-wrap break-words">{m.text || "(empty message)"}</p>
                 </div>

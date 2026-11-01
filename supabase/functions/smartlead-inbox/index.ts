@@ -70,8 +70,31 @@ interface Message {
   time: string | null;
   subject: string | null;
   text: string;
+  // Who actually wrote it — on a reply it can be a colleague of the lead,
+  // not the lead themselves.
+  from: string | null;
+  // Everyone copied on it, so a salesperson can see who else is reading.
+  cc: string[];
   // Needed to thread a reply onto the right message; not sent to the app.
   raw: any;
+}
+
+/**
+ * Addresses from whatever shape SmartLead uses: "a@x.com, b@y.com",
+ * ["a@x.com"], or [{ name, email }] / [{ address }]. A "Name <a@x.com>"
+ * string is kept whole, since the name is the useful part.
+ */
+export function parseAddresses(value: unknown): string[] {
+  if (value == null || value === "") return [];
+  const items = Array.isArray(value) ? value : String(value).split(/[,;]/);
+  return items
+    .map((v: any) => {
+      if (typeof v === "string") return v.trim();
+      const email = v?.email ?? v?.address ?? "";
+      const name = v?.name ?? "";
+      return name && email ? `${name} <${email}>` : String(email || name).trim();
+    })
+    .filter((v) => v.length > 0);
 }
 
 /**
@@ -94,6 +117,10 @@ export function normalizeHistory(history: any[]): Message[] {
       time: h?.time ?? h?.sent_time ?? h?.created_at ?? h?.sent_at ?? h?.message_time ?? null,
       subject: h?.subject ?? null,
       text: htmlToText(String(h?.email_body ?? h?.body ?? "")),
+      // SmartLead doesn't document these, so every name it has been seen
+      // to use is tried. Missing from a message means nobody was copied.
+      from: parseAddresses(h?.from ?? h?.from_email ?? h?.sender_email)[0] ?? null,
+      cc: parseAddresses(h?.cc ?? h?.cc_emails ?? h?.cc_email ?? h?.email_cc ?? h?.cc_list),
       raw: h,
     }))
     .sort((a, b) => stamp(a.time) - stamp(b.time));
@@ -235,6 +262,10 @@ Deno.serve(async (req) => {
     }
     const histJson = await histRes.json();
     const messages = normalizeHistory(histJson?.history ?? []);
+    // Field names only, never content: shows in the function logs which
+    // keys SmartLead really sends on a reply (CC isn't documented).
+    const firstReply = messages.find((m) => m.type === "reply");
+    if (firstReply) console.log("reply fields:", Object.keys(firstReply.raw ?? {}).join(", "));
 
     if (action === "thread") {
       return json({

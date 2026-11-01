@@ -32,6 +32,10 @@ export interface ThreadMessage {
   time: string | null;
   subject: string | null;
   text: string;
+  /** Who wrote it; on a reply, possibly a colleague of the lead. */
+  from?: string | null;
+  /** Everyone copied on it. */
+  cc?: string[];
 }
 
 export function conversationName(c: Pick<Conversation, "full_name" | "first_name" | "last_name" | "email">): string {
